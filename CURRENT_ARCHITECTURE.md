@@ -1,4 +1,4 @@
-# Beatless 当前架构说明（2026-03-18）
+# Beatless 当前架构说明（2026-03-18, V4）
 
 ## 1. 当前真实生效架构
 
@@ -123,7 +123,15 @@
 
 ---
 
-## 5. 当前你需要知道的关键点
+## 5. V4 已生效改动（运行态）
+
+- 协议抽取已生效：`~/.openclaw/beatless/protocols/{CORE,ROUTING,RECEIPT,FAILURE}.md`
+- AGENTS 瘦身已生效：`workspace-lacia` 从 230 行降到 84 行，其他关键 agent 也已替换为短版
+- cron payload 瘦身已生效：`START/CHECK/CLOSE/REPLAY` 均为短文本策略触发
+- 队列漂移修复已生效：`queue_cycle.sh` 会同步 `queues.backlog` 与 `tasks[]`
+- Memory distill 已启用：`Beatless Memory DISTILL` 每 4 小时运行一次
+
+## 6. 当前你需要知道的关键点
 
 - 现在主架构是：**Lacia 中枢 + TASKS 状态机 + cron 周期推进 + Report 证据落盘**。
 - V1 Full 回归和值守联调均已通过（PASS），可继续进入真实开发任务。

@@ -18,6 +18,8 @@ This pack is designed as an engineering-ready Soul set, not roleplay content.
 - `docs/02-skills-configuration-and-usage.md`: Skills 配置与调用手册（安装、同步、验证、故障）
 - `docs/03-test-and-acceptance-checklist.md`: 测试与验收清单（可直接按项执行）
 - `docs/04-parallelism-and-delivery-fallback.md`: 并行机制与飞书回执降级策略
+- `docs/05-v4-slim-protocol-implementation.md`: V4 瘦身协议已实现项（运行态对齐）
+- `docs/06-v4-smoke-prompts.md`: V4 系统级联调 Prompt 清单
 - `souls/001-kouka/SOUL.md`: siege mode (short-term blocker removal)
 - `souls/002-snowdrop/SOUL.md`: chaos mode (divergent branching only)
 - `souls/003-satonus/SOUL.md`: order mode (structure, governance, durability)
