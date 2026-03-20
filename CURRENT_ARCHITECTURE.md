@@ -1,142 +1,56 @@
-# Beatless 当前架构说明（2026-03-19, VNext）
+# Beatless 当前架构（RawCli V2 Hardened）
 
-## 1. 当前真实生效架构
+Updated: 2026-03-20 (Asia/Shanghai)
 
-当前 OpenClaw 入口仍是 **Lacia**，运行模式是「主编排 + 任务账本 + cron 周期驱动 + 报告落盘」。
+## 1. 总体形态
+Beatless 当前采用「5 Core Agent + 4 RawCli Tool Pool + tmux dispatch hook」架构。
+目标是把“决策”和“执行”拆开：
+- 决策由 core agent 负责（owner_agent）
+- 执行由 raw cli tool 负责（executor_tool）
 
-- 模型层：统一 `kimi-coding/k2p5`
-- 入口绑定：Feishu -> `lacia`
-- 任务真相源：`~/.openclaw/beatless/TASKS.yaml`
-- 调度方式：`~/.openclaw/cron/jobs.json`（isolated cron sessions）
-- 报告目录：`/home/yarizakurahime/claw/Report/`
+## 2. Core Agent 层（任务所有权）
+- `lacia`: 总调度/收敛/回执
+- `kouka`: 快速响应与应急
+- `methode`: 日常开发执行与整合
+- `satonus`: 评审与裁决
+- `snowdrop`: 探索与发散
 
-当前 agents.list（运行层）为：
-- `lacia`
-- `methode`
-- `satonus`
-- `kouka`
-- `snowdrop`
-- `codex-builder`（ACP -> codex）
-- `gemini-researcher`（ACP -> gemini）
-- `claude-architect`（ACP -> claude）
-- `claude-architect-opus`（ACP -> claude-opus）
-- `claude-architect-sonnet`（ACP -> claude-sonnet）
+## 3. RawCli Tool Pool（执行层）
+- `codex_cli`: 开源检索/复杂代码/疑难复现
+- `claude_sonnet_cli`: 日常前后端/API开发
+- `claude_opus_cli`: 架构边界/回滚/高复杂重构
+- `gemini_cli`: 学术推理/证明/第一性分析
 
-并发配置（2026-03-18 已更新）：
-- `TASKS.yaml` -> `max_parallel_subtasks: 8`
-- `openclaw.json` -> `acp.maxConcurrentSessions: 8`
+## 4. 路由与调度合同
+- 路由单一合同: `owner_agent + executor_tool`
+- 工具定义单一真相源: `TOOL_POOL.yaml`
+- 执行入口: `dispatch-queue.jsonl`
+- 执行结果: `dispatch-results/<task_id>.json`
 
----
+## 5. 运行时链路
+1. Feishu 消息进入 `lacia`。
+2. 入口 ACK 先返回（两行合同）：
+   - `ACK_RECEIVED`
+   - `task_id: <id>`
+3. `executor_tool != null` 时入队 dispatch。
+4. tmux hook 读取 queue，创建独立 pane 执行 CLI。
+5. 结果写回 result json + cli 输出文件。
+6. 最终回执发送前经过 schema gate 校验。
 
-## 2. 主执行链路（从触发到收口）
+## 6. 治理机制（已落地）
+- 入口 ACK 脚本化：`rawcli_ingress_ack_submit.sh`
+- 回执结构门禁：`receipt_schema_gate.sh`
+- dispatch 输出校验：`expect_regex` / `expect_exact_line`
+- 输出硬约束：禁止调试元数据与过程叙述外泄
 
-1. 触发源
-- Feishu 消息触发 `lacia`
-- cron 触发 `lacia`（START/CHECK/CLOSE/REPLAY）
+## 7. 证据与路径约定
+- 主证据目录：`/home/yarizakurahime/claw/Report/`
+- ACK 证据：`Report/acks/`
+- CLI 输出：`Report/<task_id>-cli-output.md`
+- 回执草稿：`Report/receipts/<task_id>.md`
 
-2. Lacia 读取顺序（分层）
-- START/CLOSE：全读 `USER_SOUL.md + MEMORY.md + TASKS.yaml`
-- CHECK（常规）：轻读 `TASKS.yaml`
-- CHECK（review/blocked/escalation）：升级读取 `MEMORY.md`
-- CHECK（目标冲突/策略冲突）：再读取 `USER_SOUL.md`
-
-3. 任务推进
-- `ready -> in_progress`：进入执行
-- `in_progress -> review`：进入评审
-- `review -> done / ready / dead_letter`：收口或重试
-
-4. 收口标准
-- 必需产物文件存在（`required_reports`）
-- 质量门禁通过（`quality_gate.sh`）
-- 状态机合法流转
-- 回执失败可补发（`pending-delivery.json` + REPLAY）
-
----
-
-## 3. 5 个 Beatless 如何触发
-
-这里按你常用的五角色理解：`Lacia / Methode / Satonus / Kouka / Snowdrop`。
-
-### 3.1 Lacia（规划/协调）
-触发条件：
-- Feishu 指令到达（绑定入口）
-- cron 的 `START/CHECK/CLOSE/REPLAY` 到点
-
-动作：
-- 读取三件套（SOUL -> MEMORY -> TASKS）
-- 选择任务、更新状态、安排执行或评审
-
-### 3.2 Methode（执行）
-触发条件：
-- 存在 `in_progress` 任务，且 CHECK 周期判定需要执行
-
-动作：
-- 按任务 acceptance_criteria 产出文件
-- 写入 `Report/`
-- 任务改为 `review`
-
-### 3.3 Satonus（评审语义）
-触发条件：
-- 任务状态进入 `review`
-- 或手动要求 `mode=review`
-
-动作：
-- 跑门禁（quality gate）
-- 判定 PASS/FAIL
-- 写评审报告并回写状态
-
-### 3.4 Kouka（emergency 模式）
-触发条件：
-- 快速检索/截图/快速验证（默认 quick mode，300s）
-- 或任务标记 `mode=emergency`
-- 或出现关键阻塞（构建挂、服务挂、核心路径报错）
-
-动作：
-- 走最小修复路径
-- 优先恢复可用性
-- 非关键检查可降级
-
-说明：当前主要由模式标签触发；可按任务显式调度。
-
-### 3.5 Snowdrop（explore 模式）
-触发条件：
-- 任务标记 `mode=explore`
-- 或需要方案探索、原型验证
-
-动作：
-- Phase-A：发散 3 个方向（假设、验证路径、失败信号）
-- Phase-B：强制并行双检索（`codex-builder` + `gemini-researcher`）
-- Phase-C：汇总结论；若冲突则 `needs_arbitration=true` 交 `satonus` 裁决
-
-说明：当前主要由模式标签触发；可按任务显式调度。
-
----
-
-## 4. 与三专家（Codex/Gemini/Claude）的关系
-
-三专家目前是「能力增强通道」：
-- `codex-builder`：复杂编码/审查
-- `gemini-researcher`：调研与发散
-- `claude-architect`：架构边界与评审
-
-触发方式：
-- 由 `lacia` 或 `methode` 在复杂任务时调用
-- 保持“主流程轻量，复杂问题升级专家”
-- `claude-generalist` 走“按任务能力路由”，不再依赖固定 Agency 激活短语
-
----
-
-## 5. V4 已生效改动（运行态）
-
-- 协议抽取已生效：`~/.openclaw/beatless/protocols/{CORE,ROUTING,RECEIPT,FAILURE,REBUTTAL}.md`
-- AGENTS 瘦身已生效：`workspace-lacia` 从 230 行降到 84 行，其他关键 agent 也已替换为短版
-- cron payload 瘦身已生效：`START/CHECK/CLOSE/REPLAY` 均为短文本策略触发
-- 队列漂移修复已生效：`queue_cycle.sh` 会同步 `queues.backlog` 与 `tasks[]`
-- Memory distill 已启用：`Beatless Memory DISTILL` 每 4 小时运行一次
-
-## 6. 当前你需要知道的关键点
-
-- 现在主架构是：**Lacia 中枢 + TASKS 状态机 + cron 周期推进 + Report 证据落盘**。
-- V1 Full 回归和值守联调均已通过（PASS），可继续进入真实开发任务。
-- 回执补发链路已修复旧路径报错：`pending-delivery.json` 已清理历史悬挂项，REPLAY 手动复验通过。
-- 如果后续要更强“全自治”，下一步应补齐：工具权限隔离（allow/deny）、sandbox 分角色、memory scope guard。
+## 8. 当前边界
+当前版本已具备 RawCli 主干能力，但“理想形态”仍差三块：
+1. 运行时硬化（故障分类、健康检查、稳定重启）
+2. 可观测性（统一指标与主动告警）
+3. 自动化治理（CI 强制 owner/executor 与 hook 合同）
