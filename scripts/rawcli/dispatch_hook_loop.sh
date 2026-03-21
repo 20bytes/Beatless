@@ -11,6 +11,7 @@ REPORT="/home/yarizakurahime/claw/Report"
 TOOL_POOL="$BEATLESS/TOOL_POOL.yaml"
 METRICS_DIR="$BEATLESS/metrics"
 EVENTS_FILE="$METRICS_DIR/dispatch-events.jsonl"
+SCRIPTS="$BEATLESS/scripts"
 SESSION="${SESSION_NAME:-beatless-v2}"
 DISPATCH_WIN="dispatch"
 DISPATCH_MAX_PARALLEL="${DISPATCH_MAX_PARALLEL:-4}"
@@ -173,6 +174,10 @@ process_line() {
   local task_id tool_id prompt timeout_override expect_regex expect_exact_line model_override run_id phase
   local requested_tool_id budget_gate budget_result
 
+  if ! echo "$line" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'task_id' in d and 'executor_tool' in d and 'prompt' in d" >/dev/null 2>&1; then
+    log "WARN: skip malformed queue line"
+    return
+  fi
   task_id=$(echo "$line" | python3 -c "import json,sys; print(json.load(sys.stdin)['task_id'])")
   tool_id=$(echo "$line" | python3 -c "import json,sys; print(json.load(sys.stdin)['executor_tool'])")
   requested_tool_id="$tool_id"
