@@ -38,3 +38,9 @@ jobs:
 
       - name: Validate receipt schema fixtures
         run: bash scripts/ci/test_receipt_schema_gate.sh
+
+      - name: Validate entropy policies
+        run: bash scripts/ci/validate_entropy_policies.sh
+
+      - name: Validate convergence ratio (if state exists)
+        run: bash scripts/ci/validate_convergence_ratio.sh || true

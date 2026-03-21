@@ -231,6 +231,31 @@ while true; do
     fi
   fi
 
+  # V4: entropy convergence gate
+  if [[ -x "$SCRIPTS/entropy_convergence_gate.sh" ]] && \
+     [[ -f "$BEATLESS/entropy-policies.yaml" ]]; then
+    conv_json="$(bash "$SCRIPTS/entropy_convergence_gate.sh" 2>/dev/null || true)"
+    if [[ -n "$conv_json" ]]; then
+      conv_line="$(echo "$conv_json" | python3 -c '
+import json
+import sys
+try:
+    d = json.load(sys.stdin)
+    print("ratio={:.2f} blocked={} ideas={} decisions={}".format(
+        float(d.get("convergence_ratio", 0.0)),
+        bool(d.get("explore_blocked", False)),
+        int(d.get("idea_count", 0)),
+        int(d.get("decision_count", 0)),
+    ))
+except Exception:
+    print("parse_error")
+')"
+      log "convergence_gate: $conv_line"
+    else
+      log "convergence_gate failed"
+    fi
+  fi
+
   if SESSION_NAME="$SESSION" bash "$SCRIPTS/rawcli_healthcheck.sh" >/dev/null 2>&1; then
     fails=0
     log "healthcheck ok"

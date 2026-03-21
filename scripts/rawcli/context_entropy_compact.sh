@@ -7,9 +7,41 @@ set -euo pipefail
 BEATLESS="${HOME}/.openclaw/beatless"
 TASKS="${1:-$BEATLESS/TASKS.yaml}"
 REPORT_DIR="/home/yarizakurahime/claw/Report/compaction"
-TRIGGER_ITERATION="${COMPACTION_TRIGGER_ITERATION:-3}"
-MIN_DESC_CHARS="${COMPACTION_MIN_DESC_CHARS:-900}"
-INPLACE_TRUNCATE="${COMPACTION_INPLACE_TRUNCATE:-true}"
+POLICIES="$BEATLESS/entropy-policies.yaml"
+MODE_FILE="/tmp/beatless_exec_mode"
+CURRENT_MODE="$(cat "$MODE_FILE" 2>/dev/null || echo "daily")"
+[[ "$CURRENT_MODE" == "intense" ]] || CURRENT_MODE="daily"
+
+read_policy() {
+  python3 - "$POLICIES" "$CURRENT_MODE" <<'PY'
+import sys
+try:
+    import yaml
+except Exception:
+    print(3)
+    print(900)
+    print("true")
+    raise SystemExit(0)
+
+policies = sys.argv[1]
+mode = sys.argv[2]
+try:
+    d = yaml.safe_load(open(policies, "r", encoding="utf-8")) or {}
+    mc = ((d.get("modes") or {}).get(mode) or {}).get("compaction", {})
+    print(mc.get("trigger_iteration", 3))
+    print(mc.get("soft_threshold_chars", 900))
+    print("true" if mc.get("inplace_truncate", True) else "false")
+except Exception:
+    print(3)
+    print(900)
+    print("true")
+PY
+}
+
+readarray -t POLICY_VALS < <(read_policy)
+TRIGGER_ITERATION="${POLICY_VALS[0]:-3}"
+MIN_DESC_CHARS="${POLICY_VALS[1]:-900}"
+INPLACE_TRUNCATE="${POLICY_VALS[2]:-true}"
 
 mkdir -p "$REPORT_DIR"
 

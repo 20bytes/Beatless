@@ -221,6 +221,22 @@ for ev in all_events:
 # Placeholder for future per-task token counting integration
 context_tokens_per_task = 0
 
+# V4: entropy convergence metrics from gate state
+convergence_state_path = pathlib.Path("/tmp/beatless_convergence_state.json")
+idea_count = 0
+decision_count = 0
+convergence_ratio = 1.0
+explore_blocked = False
+if convergence_state_path.exists():
+    try:
+        cs = json.loads(convergence_state_path.read_text(encoding="utf-8"))
+        idea_count = int(cs.get("idea_count", 0))
+        decision_count = int(cs.get("decision_count", 0))
+        convergence_ratio = float(cs.get("convergence_ratio", 1.0))
+        explore_blocked = bool(cs.get("explore_blocked", False))
+    except Exception:
+        pass
+
 payload = {
     "generated_at": now.isoformat(),
     "window_minutes": window_minutes,
@@ -247,6 +263,12 @@ payload = {
     "queue_lag_ms_p95": queue_lag_ms_p95,
     "mode": current_mode,
     "context_tokens_per_task": context_tokens_per_task,
+    "entropy": {
+        "idea_count": idea_count,
+        "decision_count": decision_count,
+        "convergence_ratio": convergence_ratio,
+        "explore_blocked": explore_blocked,
+    },
     "anthropic_calls_today": {
         "opus": opus_today,
         "sonnet": sonnet_today,
@@ -308,6 +330,18 @@ prom_lines += [
     "# HELP rawcli_context_tokens_per_task Estimated context tokens per task.",
     "# TYPE rawcli_context_tokens_per_task gauge",
     f"rawcli_context_tokens_per_task {context_tokens_per_task}",
+    "# HELP rawcli_entropy_idea_count Number of explore or brainstorm ideas in flight.",
+    "# TYPE rawcli_entropy_idea_count gauge",
+    f"rawcli_entropy_idea_count {idea_count}",
+    "# HELP rawcli_entropy_decision_count Number of tasks with decisions (done or review).",
+    "# TYPE rawcli_entropy_decision_count gauge",
+    f"rawcli_entropy_decision_count {decision_count}",
+    "# HELP rawcli_entropy_convergence_ratio Decision to idea convergence ratio.",
+    "# TYPE rawcli_entropy_convergence_ratio gauge",
+    f"rawcli_entropy_convergence_ratio {convergence_ratio:.6f}",
+    "# HELP rawcli_entropy_explore_blocked Whether new explore tasks are blocked.",
+    "# TYPE rawcli_entropy_explore_blocked gauge",
+    f"rawcli_entropy_explore_blocked {1 if explore_blocked else 0}",
     "# HELP rawcli_window_failure_type_total Dispatch failures in rolling window by failure_type.",
     "# TYPE rawcli_window_failure_type_total gauge",
 ]
@@ -354,6 +388,10 @@ out.write_text(
         f"- anthropic_calls_today.opus: {((d.get('anthropic_calls_today') or {}).get('opus', 0))}",
         f"- anthropic_calls_today.sonnet: {((d.get('anthropic_calls_today') or {}).get('sonnet', 0))}",
         f"- context_tokens_per_task: {d.get('context_tokens_per_task', 0)}",
+        f"- entropy.idea_count: {((d.get('entropy') or {}).get('idea_count', 0))}",
+        f"- entropy.decision_count: {((d.get('entropy') or {}).get('decision_count', 0))}",
+        f"- entropy.convergence_ratio: {((d.get('entropy') or {}).get('convergence_ratio', 1.0)):.3f}",
+        f"- entropy.explore_blocked: {((d.get('entropy') or {}).get('explore_blocked', False))}",
         "",
         "## Window Status",
         *(f"- {k}: {v}" for k, v in sorted(window['status'].items())),
