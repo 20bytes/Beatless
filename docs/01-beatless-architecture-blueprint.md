@@ -1,43 +1,39 @@
-# Beatless 架构蓝图（OpenClaw 版）
+# [V2 ALIGNED] Beatless 架构蓝图（RawCli V2）
+
+Updated: 2026-03-21
 
 ## 1. 目标
 
-Beatless 在 OpenClaw 内的目标是：
+Beatless 在 OpenClaw 内的目标：
 
-1. 入口统一：飞书统一进入 `lacia`
-2. 分工稳定：规划/执行/审查职责分离
-3. 长时可控：可持续运行、可追踪、可回滚
-4. 高风险降级：失败可回退，不伪造结果
+1. 入口统一：飞书只进入 `lacia`
+2. 分工稳定：5 core agent 职责边界清晰
+3. 执行直连：RawCli 工具池统一执行，不走 wrapper 嵌套
+4. 长时可控：可追踪、可回放、可回滚
+5. 高风险可降级：失败分类明确，禁止伪完成
 
 ---
 
 ## 2. 核心拓扑
 
-当前设计采用 2+3 常驻 + 3 模式标签结构：
+当前设计采用 `5 core agents + RawCli tool pool + tmux dispatch hook`：
 
-1. 主链路（常驻）
-- `lacia`：规划与调度（Planner）
-- `methode`：执行实现（Executor）
+1. Core Agents（任务所有权）
+- `lacia`：入口、路由、收敛、回执
+- `methode`：主执行
+- `satonus`：评审与验收
+- `kouka`：快速/应急通道
+- `snowdrop`：探索与发散控制
 
-2. 模式标签（非常驻 Agent）
-- `mode=emergency`：Kouka 策略（高压攻坚）
-- `mode=explore`：Snowdrop 策略（发散探索）
-- `mode=review`：Satonus 策略（严苛验收）
+2. RawCli Tools（命令执行权）
+- `codex_cli`：复杂代码/检索/复现
+- `claude_generalist_cli`：日常开发
+- `claude_architect_opus_cli`：高复杂架构设计
+- `gemini_cli`：学术推理与第一性分析
 
-3. 外挂专家（三 ACP）
-- `codex-builder`：复杂代码与疑难问题
-- `gemini-researcher`：外部调研与方案对比
-- `claude-architect`：架构设计与演进路径
+3. 调度主链
 
-建议的主流程：
-
-`lacia -> methode -> experts(mode-aware) -> lacia`
-
-复杂任务时由 `lacia/methode` 升级调用 ACP：
-
-`methode -> codex-builder`
-`lacia -> gemini-researcher`
-`lacia -> claude-architect`
+`ingress -> route_task -> owner_agent + executor_tool -> dispatch-queue.jsonl -> tmux hook -> dispatch-results -> receipt`
 
 ---
 
@@ -46,138 +42,117 @@ Beatless 在 OpenClaw 内的目标是：
 ## 3.1 lacia
 
 负责：
-- 读取任务池并做优先级决策
-- 将模糊需求拆成可执行子任务
-- 分派给 methode/satonus 或 ACP 专家
+- 接收飞书消息
+- 生成 ACK（两行）
+- 路由为 `owner_agent + executor_tool`
+- 汇总结果并输出最终回执
 
 不负责：
-- 长时直接编码执行
-- 在无证据情况下宣称“已完成”
+- 长时直接编码
+- 无证据宣称完成
 
 ## 3.2 methode
 
 负责：
-- 常规工程实现
-- 功能开发、修复、改造、联调
-- 产出可运行结果和变更清单
+- 代码实现、修复、联调
+- 产出可复现结果与证据
+- 复杂任务 dispatch 到 `codex_cli`
 
 不负责：
-- 自行放行质量门禁（必须经过 satonus）
+- 绕过 satonus 质量门禁
 
-## 3.3 ACP 专家
+## 3.3 satonus
 
-- `codex-builder`：复杂算法、疑难 bug、大规模重构
-- `gemini-researcher`：资料调研、方案候选、开源对比
-- `claude-architect`：边界定义、模块分层、迁移计划
+负责：
+- 验收与裁决
+- 证据一致性与回执质量审查
 
-## 3.4 模式策略（Soul 内核）
+不负责：
+- 代替执行与路线决策
 
-- `mode=emergency`：Codex 主冲刺，Claude 辅助兜底
-- `mode=explore`：Gemini 主探索，Codex 做可行性样例
-- `mode=review`：Claude 主评审，Codex 做代码级审计
+## 3.4 kouka / snowdrop
+
+- `kouka`：应急止血、快入快出（超范围即升级工具执行）
+- `snowdrop`：探索任务，Phase-B 并行 `codex_cli + gemini_cli`
 
 ---
 
-## 4. 数据与状态面
+## 4. SSOT 与状态面
 
-Beatless 的单一事实源（SSOT）：
-
+单一事实源：
 - `~/.openclaw/beatless/TASKS.yaml`
+- `~/.openclaw/beatless/ROUTING.yaml`
+- `~/.openclaw/beatless/TOOL_POOL.yaml`
 
-质量规则：
-
+长期记忆与规则：
+- `~/.openclaw/beatless/MEMORY.md`
 - `~/.openclaw/beatless/QUALITY_GATES.md`
 
-长期记忆：
-
-- `~/.openclaw/beatless/MEMORY.md`
-
-每次执行必须写 `DONE/DOING/BLOCKED/NEXT`，禁止口头完成。
+任务输出必须写 `DONE/DOING/BLOCKED/NEXT + VERDICT`，禁止口头完成。
 
 ---
 
 ## 5. 任务状态机（建议）
 
-推荐状态：
-
 `backlog -> ready -> in_progress -> review -> done`
 
 异常分支：
-
 - `in_progress -> blocked`
-- `review -> ready`（审查不通过退回）
+- `review -> ready`
 - 任意状态 -> `cancelled`
 
-最小字段建议：
+最小字段：
 
 ```yaml
-id: BT-20260317-001
-title: "FoodDB 前后端修复"
+id: BT-20260321-001
+title: "任务标题"
 priority: high
 status: ready
-assigned_agent: methode
-context_hash: "..."
+owner_agent: methode
+executor_tool: codex_cli
 acceptance_criteria:
-  - "frontend build pass"
-  - "backend health endpoint ok"
+  - "..."
 outputs: []
 notes: ""
 ```
 
 ---
 
-## 6. 长时任务运行策略（8小时级）
+## 6. 长时运行策略
 
-原则：
-
-1. 心跳只做调度与巡检，不做重活
-2. 重任务放到独立执行回合（隔离上下文）
-3. 每 30 分钟固定汇报一次（带绝对时间）
+1. ACK 快速返回（目标 < 3s）
+2. 执行与回执解耦（队列化）
+3. 失败分型（timeout/network/auth/cli-arg）
+4. 证据先于结论
 
 汇报模板：
 
 ```text
-[时间] 2026-03-17 02:00 GMT+8
+[时间] 2026-03-21 12:00 GMT+8
 [任务ID] ...
 [DONE] ...
 [DOING] ...
 [BLOCKED] ...
 [NEXT] ...
+[VERDICT] PASS|PARTIAL|FAIL
 ```
 
-遇到阻塞 > 30 分钟：
+---
 
-- 立即上报 `BLOCKED`
-- 附报错原文 + 已尝试动作 + 下一步建议
+## 7. 防跑偏规则
+
+1. 无证据不可报完成
+2. 不允许 agent 名与 model 名混用
+3. 路由使用 `owner_agent + executor_tool` 双字段
+4. 过程调试文本不得进入飞书回执
 
 ---
 
-## 7. 反跑偏规则
-
-1. 禁止伪完成：没有命令/日志/文件证据，不能报完成
-2. 禁止角色越权：
-- `lacia` 不长期代替 `methode` 写代码
-- `methode` 不绕过 `satonus` 直接放行
-3. 禁止无边界发散：`snowdrop` 产出必须回到 `lacia` 收敛
-4. 禁止会话幻觉：必须优先读任务池和当前文件状态
-
----
-
-## 8. 与 Edict 的关系
-
-- Beatless 是你当前主编排
-- Edict 可以保留为备份设计，不参与当前主路由
-- 飞书绑定仅保留 `lacia` 主入口，避免双入口冲突
-
----
-
-## 9. 启动与生效
+## 8. 启动与检查
 
 ```bash
 bash /home/yarizakurahime/claw/Beatless/scripts/setup_openclaw_beatless.sh
 ```
-
-完成后检查：
 
 ```bash
 jq '.agents.list[].id' ~/.openclaw/openclaw.json
@@ -185,5 +160,5 @@ jq '.bindings' ~/.openclaw/openclaw.json
 ```
 
 应看到：
-- agents 包含 `lacia/methode/satonus/...`
-- Feishu 绑定到 `lacia`
+- 5 core agents
+- Feishu 绑定仅 `lacia`

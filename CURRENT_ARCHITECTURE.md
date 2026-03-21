@@ -1,56 +1,64 @@
-# Beatless 当前架构（RawCli V2 Hardened）
+# Beatless 当前架构（RawCli V2 + Soul Slim）
 
-Updated: 2026-03-20 (Asia/Shanghai)
+Updated: 2026-03-21 (Asia/Shanghai)
 
 ## 1. 总体形态
-Beatless 当前采用「5 Core Agent + 4 RawCli Tool Pool + tmux dispatch hook」架构。
-目标是把“决策”和“执行”拆开：
-- 决策由 core agent 负责（owner_agent）
-- 执行由 raw cli tool 负责（executor_tool）
+Beatless 当前采用「5 Core Agent + 4 RawCli Tool Pool + tmux dispatch hook」架构：
+- 决策层：`owner_agent`
+- 执行层：`executor_tool`
+
+核心目标：避免 wrapper 嵌套，保证 RawCli 直连执行、快速 ACK、结构化回执。
 
 ## 2. Core Agent 层（任务所有权）
-- `lacia`: 总调度/收敛/回执
-- `kouka`: 快速响应与应急
+- `lacia`: 入口调度/收敛/回执
+- `kouka`: 快速响应与应急止血
 - `methode`: 日常开发执行与整合
 - `satonus`: 评审与裁决
-- `snowdrop`: 探索与发散
+- `snowdrop`: 探索与发散控制
 
 ## 3. RawCli Tool Pool（执行层）
 - `codex_cli`: 开源检索/复杂代码/疑难复现
-- `claude_sonnet_cli`: 日常前后端/API开发
-- `claude_opus_cli`: 架构边界/回滚/高复杂重构
-- `gemini_cli`: 学术推理/证明/第一性分析
+- `claude_generalist_cli`: 日常前后端/API开发
+- `claude_architect_opus_cli`: 架构边界/重构设计
+- `gemini_cli`: 学术推理/第一性分析
+
+兼容别名仍保留在 `TOOL_POOL.yaml`（如 `claude_opus_cli`），但新任务统一使用上述主名称。
 
 ## 4. 路由与调度合同
-- 路由单一合同: `owner_agent + executor_tool`
-- 工具定义单一真相源: `TOOL_POOL.yaml`
-- 执行入口: `dispatch-queue.jsonl`
-- 执行结果: `dispatch-results/<task_id>.json`
+- 路由合同：`owner_agent + executor_tool`
+- 工具定义 SSOT：`~/.openclaw/beatless/TOOL_POOL.yaml`
+- 路由规则 SSOT：`~/.openclaw/beatless/ROUTING.yaml`
+- 入队文件：`~/.openclaw/beatless/dispatch-queue.jsonl`
+- 结果文件：`~/.openclaw/beatless/dispatch-results/<task_id>.json`
 
 ## 5. 运行时链路
-1. Feishu 消息进入 `lacia`。
-2. 入口 ACK 先返回（两行合同）：
-   - `ACK_RECEIVED`
-   - `task_id: <id>`
-3. `executor_tool != null` 时入队 dispatch。
-4. tmux hook 读取 queue，创建独立 pane 执行 CLI。
-5. 结果写回 result json + cli 输出文件。
-6. 最终回执发送前经过 schema gate 校验。
+1. Feishu 消息进入 `lacia`
+2. 入口 ACK（两行）立即返回
+3. `executor_tool != null` 时写入 dispatch queue
+4. tmux hook 事件驱动执行 CLI（独立 pane）
+5. 结果写回 result json + cli 输出证据
+6. 最终回执通过 schema gate 后发送
 
-## 6. 治理机制（已落地）
-- 入口 ACK 脚本化：`rawcli_ingress_ack_submit.sh`
-- 回执结构门禁：`receipt_schema_gate.sh`
-- dispatch 输出校验：`expect_regex` / `expect_exact_line`
-- 输出硬约束：禁止调试元数据与过程叙述外泄
+## 6. 输出治理（已落地）
+- ACK 脚本化：`rawcli_ingress_ack_submit.sh`
+- 回执门禁：`receipt_schema_gate.sh`
+- 输出校验：`expect_regex` / `expect_exact_line`
+- 事件模板：`templates/event-phrases.yaml`
+- 飞书硬约束：禁止调试元数据、过程独白、内部路径泄漏
 
-## 7. 证据与路径约定
-- 主证据目录：`/home/yarizakurahime/claw/Report/`
-- ACK 证据：`Report/acks/`
-- CLI 输出：`Report/<task_id>-cli-output.md`
-- 回执草稿：`Report/receipts/<task_id>.md`
+## 7. Soul Slim（2026-03-21）
+已完成 5 Soul 的统一瘦身结构，按 7 章节组织：
+- Identity
+- Core Truths
+- Boundaries
+- Vibe
+- Operating Rules
+- Core Focus
+- Taboos
 
-## 8. 当前边界
-当前版本已具备 RawCli 主干能力，但“理想形态”仍差三块：
-1. 运行时硬化（故障分类、健康检查、稳定重启）
-2. 可观测性（统一指标与主动告警）
-3. 自动化治理（CI 强制 owner/executor 与 hook 合同）
+效果：单 Soul 运行时文本收敛为约 50 行，减少上下文负担并降低路由歧义。
+
+## 8. 当前未完成差距
+1. 运行时硬化：故障分类与稳定重启策略继续增强
+2. 可观测性：统一指标与告警出站仍需完善
+3. 自动化治理：CI 对 owner/executor 与回执 schema 的强制校验待补齐
