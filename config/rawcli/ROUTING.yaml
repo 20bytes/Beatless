@@ -1,63 +1,71 @@
-# ROUTING_V2.yaml — V2 RawCLI 路由规则
-# 替代 ROUTING.yaml + MODEL_ROUTING.yaml
-# 位置: ~/.openclaw/beatless/ROUTING.yaml
+# ROUTING_V3.yaml — Beatless RawCli Routing Rules
+# Location: ~/.openclaw/beatless/ROUTING.yaml
+# Invariant: every rule must include owner_agent + executor_tool (null allowed explicitly).
 
-version: 2
+version: 3
 
-# 规则优先级: priority 越高越先匹配
 routing_rules:
   - id: quick-response
     pattern: "快速|查一下|看一下|截图|verify quickly|screenshot|check status|验证一下"
     owner_agent: kouka
-    executor_tool: null          # kouka 自行处理（Kimi K2.5）
+    executor_tool: null
     priority: 120
-    notes: "快入快出，timeout 300s。需要深搜时 kouka 自行 dispatch codex_cli"
+    mode: daily
+    notes: "Fast-in fast-out. Deep search can dispatch codex_cli."
 
   - id: explore-brainstorm
     pattern: "brainstorm|头脑风暴|explore|发散|idea|创新|CDMN|RDE"
     owner_agent: snowdrop
-    executor_tool: null          # snowdrop 控制双搜流程
+    executor_tool: null
     priority: 115
-    notes: "Phase-B 强制 dispatch codex_cli + gemini_cli"
-
-  - id: architecture
-    pattern: "architecture|system design|架构|重构.*核心|redesign|refactor.*core"
-    owner_agent: lacia
-    executor_tool: claude_opus_cli
-    priority: 100
-
-  - id: academic-proof
-    pattern: "theorem|proof|数学|物理|学术|paper|第一性原理|soul|证明|连续性|lipschitz"
-    owner_agent: snowdrop
-    executor_tool: gemini_cli
-    priority: 95
+    mode: intense
+    notes: "Phase-B should dispatch codex_cli + gemini_cli in parallel."
 
   - id: opensource-search
     pattern: "github|repo|benchmark|reproduce|复现|开源对比|检索"
     owner_agent: methode
     executor_tool: codex_cli
     priority: 105
+    mode: daily
+
+  - id: architecture
+    pattern: "architecture|system design|架构|重构.*核心|redesign|refactor.*core"
+    owner_agent: lacia
+    executor_tool: claude_architect_opus_cli
+    priority: 100
+    mode: daily
+
+  - id: academic-proof
+    pattern: "theorem|proof|数学|物理|学术|paper|第一性原理|soul|证明|连续性|lipschitz"
+    owner_agent: snowdrop
+    executor_tool: gemini_cli
+    priority: 95
+    mode: daily
 
   - id: complex-coding
     pattern: "implement.*complex|debug.*hard|疑难|大规模重构|hotfix|critical.*bug|core.*logic"
     owner_agent: methode
     executor_tool: codex_cli
     priority: 90
+    mode: daily
 
   - id: daily-dev
     pattern: "frontend|backend|api|页面|前端|后端|组件|feature|bugfix|refactor|blog|ui|ux"
     owner_agent: methode
-    executor_tool: claude_sonnet_cli
+    executor_tool: claude_generalist_cli
     priority: 80
+    mode: daily
 
   - id: structured-build
     pattern: "build.*plan|模块拆分|工程拆分|构建计划"
     owner_agent: methode
-    executor_tool: claude_sonnet_cli
+    executor_tool: claude_architect_sonnet_cli
     priority: 70
+    mode: daily
 
   - id: default
     pattern: ".*"
     owner_agent: methode
-    executor_tool: null          # methode 自行处理（Kimi K2.5）
+    executor_tool: null
     priority: 10
+    mode: daily

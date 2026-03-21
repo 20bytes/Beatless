@@ -59,7 +59,13 @@ def validate_tool_pool(pool: dict[str, Any]) -> set[str]:
     if not isinstance(tools, dict) or not tools:
         fail("TOOL_POOL.tools must be non-empty mapping")
 
-    required_tools = {"codex_cli", "claude_sonnet_cli", "claude_opus_cli", "gemini_cli"}
+    required_tools = {
+        "codex_cli",
+        "claude_generalist_cli",
+        "claude_architect_opus_cli",
+        "claude_architect_sonnet_cli",
+        "gemini_cli",
+    }
     missing = sorted(required_tools - set(tools.keys()))
     if missing:
         fail(f"TOOL_POOL missing required tools: {missing}")
@@ -118,6 +124,8 @@ def validate_script_contracts() -> None:
         "dispatch-results",
         "dispatch-events.jsonl",
         "executor_tool",
+        "expect_exact_line",
+        "run_id",
     ]
     for token in must_have:
         if token not in text:

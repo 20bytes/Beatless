@@ -29,3 +29,12 @@ jobs:
 
       - name: Validate rawcli contracts
         run: python3 scripts/ci/validate_rawcli_contracts.py
+
+      - name: Validate routing contracts
+        run: bash scripts/ci/validate_routing_contracts.sh
+
+      - name: Validate receipt contracts
+        run: bash scripts/ci/validate_receipt_contracts.sh
+
+      - name: Validate receipt schema fixtures
+        run: bash scripts/ci/test_receipt_schema_gate.sh
