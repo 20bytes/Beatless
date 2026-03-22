@@ -8,6 +8,12 @@ ROOT="/home/yarizakurahime/claw"
 BEATLESS="$HOME/.openclaw/beatless"
 OPENCLAW_REPO="$ROOT/openclaw"
 RUN_GATEWAY="${1:-}"
+LAST_CHAT_ID_FILE="$BEATLESS/metrics/last-feishu-chat-id.txt"
+DAYTIME_CHAT_ID="${DAYTIME_HEARTBEAT_CHAT_ID:-${FEISHU_TARGET_CHAT_ID:-}}"
+
+if [[ -z "$DAYTIME_CHAT_ID" && -f "$LAST_CHAT_ID_FILE" ]]; then
+  DAYTIME_CHAT_ID="$(tr -d '\r\n' < "$LAST_CHAT_ID_FILE" 2>/dev/null || true)"
+fi
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "session already exists: $SESSION"
@@ -47,7 +53,11 @@ tmux send-keys -t "$SESSION:hooks" "SESSION_NAME=$SESSION bash $BEATLESS/scripts
 # Window 5: monitor (supervisor + watch)
 
 tmux new-window -t "$SESSION" -n monitor -c "$ROOT"
-tmux send-keys -t "$SESSION:monitor" "SESSION_NAME=$SESSION SUPERVISOR_INTERVAL_SEC=20 bash $BEATLESS/scripts/rawcli_supervisor.sh >> $BEATLESS/logs/rawcli-supervisor.log 2>&1 &" C-m
+SUPERVISOR_ENV="SESSION_NAME=$SESSION SUPERVISOR_INTERVAL_SEC=20 DAYTIME_HEARTBEAT_ENABLED=true DAYTIME_HEARTBEAT_START_HOUR=8 DAYTIME_HEARTBEAT_END_HOUR=23 DAYTIME_HEARTBEAT_INTERVAL_MIN=30 DAYTIME_HEARTBEAT_SEND_ENABLED=true"
+if [[ -n "$DAYTIME_CHAT_ID" ]]; then
+  SUPERVISOR_ENV="$SUPERVISOR_ENV DAYTIME_HEARTBEAT_CHAT_ID=$DAYTIME_CHAT_ID"
+fi
+tmux send-keys -t "$SESSION:monitor" "$SUPERVISOR_ENV bash $BEATLESS/scripts/rawcli_supervisor.sh >> $BEATLESS/logs/rawcli-supervisor.log 2>&1 &" C-m
 tmux send-keys -t "$SESSION:monitor" "watch -n 15 '$BEATLESS/scripts/rawcli_monitor_snapshot.sh'" C-m
 
 # Prime an initial health+metrics snapshot

@@ -29,6 +29,8 @@ Archived legacy docs are moved to `docs/_archived/`.
 - Source-of-truth routing: `~/.openclaw/beatless/ROUTING.yaml`
 - Source-of-truth tools: `~/.openclaw/beatless/TOOL_POOL.yaml`
 - Event phrases: `~/.openclaw/beatless/templates/event-phrases.yaml`
+- Heartbeat cadence: busy `30m` / idle `60m` (noise-reduced)
+- Closing quiet-hours: after daily closing message, no further heartbeat chatter that night
 
 ## Current Status
 

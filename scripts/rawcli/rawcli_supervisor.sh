@@ -12,9 +12,14 @@ HEARTBEAT_JSON="$BEATLESS/metrics/supervisor-heartbeat.json"
 DAYTIME_HEARTBEAT_ENABLED="${DAYTIME_HEARTBEAT_ENABLED:-true}"
 DAYTIME_HEARTBEAT_START_HOUR="${DAYTIME_HEARTBEAT_START_HOUR:-8}"
 DAYTIME_HEARTBEAT_END_HOUR="${DAYTIME_HEARTBEAT_END_HOUR:-23}"
-DAYTIME_HEARTBEAT_INTERVAL_MIN="${DAYTIME_HEARTBEAT_INTERVAL_MIN:-30}"
+DAYTIME_HEARTBEAT_INTERVAL_BUSY_MIN="${DAYTIME_HEARTBEAT_INTERVAL_BUSY_MIN:-30}"
+DAYTIME_HEARTBEAT_INTERVAL_IDLE_MIN="${DAYTIME_HEARTBEAT_INTERVAL_IDLE_MIN:-60}"
+DAYTIME_HEARTBEAT_BUSY_QUEUE_DEPTH_THRESHOLD="${DAYTIME_HEARTBEAT_BUSY_QUEUE_DEPTH_THRESHOLD:-1}"
+DAYTIME_HEARTBEAT_BUSY_QUEUE_LAG_P95_MS="${DAYTIME_HEARTBEAT_BUSY_QUEUE_LAG_P95_MS:-15000}"
+DAYTIME_HEARTBEAT_BUSY_MODES="${DAYTIME_HEARTBEAT_BUSY_MODES:-stressed,degraded}"
 DAYTIME_HEARTBEAT_SEND_ENABLED="${DAYTIME_HEARTBEAT_SEND_ENABLED:-true}"
 DAYTIME_HEARTBEAT_CHAT_ID="${DAYTIME_HEARTBEAT_CHAT_ID:-${FEISHU_TARGET_CHAT_ID:-}}"
+LAST_CHAT_ID_FILE="$BEATLESS/metrics/last-feishu-chat-id.txt"
 HOOK_LAG_THRESHOLD_MS="${HOOK_LAG_THRESHOLD_MS:-30000}"
 DAYTIME_SLOT_FILE="$BEATLESS/metrics/daytime-heartbeat-slot.txt"
 DAYTIME_MORNING_FILE="$BEATLESS/metrics/daytime-heartbeat-morning.txt"
@@ -113,6 +118,43 @@ print(int(d.get('queue_depth', 0) or 0))
 PY
 }
 
+resolve_daytime_chat_id() {
+  if [[ -n "${DAYTIME_HEARTBEAT_CHAT_ID:-}" ]]; then
+    printf '%s\n' "$DAYTIME_HEARTBEAT_CHAT_ID"
+    return
+  fi
+  if [[ -f "$LAST_CHAT_ID_FILE" ]]; then
+    local cached
+    cached="$(tr -d '\r\n' < "$LAST_CHAT_ID_FILE" 2>/dev/null || true)"
+    if [[ -n "$cached" ]]; then
+      printf '%s\n' "$cached"
+      return
+    fi
+  fi
+  python3 - "$BEATLESS/metrics/event-signals.jsonl" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+if not path.exists():
+    raise SystemExit(0)
+rows = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+for raw in reversed(rows):
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        continue
+    target = str(obj.get("target_chat_id") or "").strip()
+    if target:
+        print(target)
+        raise SystemExit(0)
+PY
+}
+
 emit_smalltalk_once_per_day() {
   local key="$1"
   local mark_file="$2"
@@ -121,9 +163,11 @@ emit_smalltalk_once_per_day() {
   if [[ -f "$mark_file" ]] && [[ "$(cat "$mark_file" 2>/dev/null)" == "$today" ]]; then
     return
   fi
-  if [[ "$DAYTIME_HEARTBEAT_SEND_ENABLED" == "true" && -n "$DAYTIME_HEARTBEAT_CHAT_ID" ]]; then
-    EVENT_SIGNAL_SEND_ENABLED=true FEISHU_TARGET_CHAT_ID="$DAYTIME_HEARTBEAT_CHAT_ID" \
-      bash "$SCRIPTS/event_signal_emit.sh" "smalltalk.${key}" "" "ok" "0" "0" "$DAYTIME_HEARTBEAT_CHAT_ID" >/dev/null || true
+  local heartbeat_chat_id
+  heartbeat_chat_id="$(resolve_daytime_chat_id || true)"
+  if [[ "$DAYTIME_HEARTBEAT_SEND_ENABLED" == "true" && -n "$heartbeat_chat_id" ]]; then
+    EVENT_SIGNAL_SEND_ENABLED=true FEISHU_TARGET_CHAT_ID="$heartbeat_chat_id" \
+      bash "$SCRIPTS/event_signal_emit.sh" "smalltalk.${key}" "" "ok" "0" "0" "$heartbeat_chat_id" >/dev/null || true
     echo "$today" > "$mark_file"
   fi
 }
@@ -135,11 +179,21 @@ emit_daytime_heartbeat_if_due() {
   if ! [[ "$DAYTIME_HEARTBEAT_START_HOUR" =~ ^[0-9]+$ && "$DAYTIME_HEARTBEAT_END_HOUR" =~ ^[0-9]+$ ]]; then
     return
   fi
-  if ! [[ "$DAYTIME_HEARTBEAT_INTERVAL_MIN" =~ ^[0-9]+$ ]] || [[ "$DAYTIME_HEARTBEAT_INTERVAL_MIN" -le 0 ]]; then
-    return
+  if ! [[ "$DAYTIME_HEARTBEAT_INTERVAL_BUSY_MIN" =~ ^[0-9]+$ ]] || [[ "$DAYTIME_HEARTBEAT_INTERVAL_BUSY_MIN" -le 0 ]]; then
+    DAYTIME_HEARTBEAT_INTERVAL_BUSY_MIN=30
+  fi
+  if ! [[ "$DAYTIME_HEARTBEAT_INTERVAL_IDLE_MIN" =~ ^[0-9]+$ ]] || [[ "$DAYTIME_HEARTBEAT_INTERVAL_IDLE_MIN" -le 0 ]]; then
+    DAYTIME_HEARTBEAT_INTERVAL_IDLE_MIN=60
+  fi
+  if ! [[ "$DAYTIME_HEARTBEAT_BUSY_QUEUE_DEPTH_THRESHOLD" =~ ^[0-9]+$ ]] || [[ "$DAYTIME_HEARTBEAT_BUSY_QUEUE_DEPTH_THRESHOLD" -lt 0 ]]; then
+    DAYTIME_HEARTBEAT_BUSY_QUEUE_DEPTH_THRESHOLD=1
+  fi
+  if ! [[ "$DAYTIME_HEARTBEAT_BUSY_QUEUE_LAG_P95_MS" =~ ^[0-9]+$ ]] || [[ "$DAYTIME_HEARTBEAT_BUSY_QUEUE_LAG_P95_MS" -lt 0 ]]; then
+    DAYTIME_HEARTBEAT_BUSY_QUEUE_LAG_P95_MS=15000
   fi
 
   local hour minute slot_key slot_num current_slot
+  local queue_depth queue_lag_p95 current_mode heartbeat_interval_min heartbeat_profile
   hour=$((10#$(date +%H)))
   minute=$((10#$(date +%M)))
 
@@ -147,8 +201,30 @@ emit_daytime_heartbeat_if_due() {
     return
   fi
 
-  slot_num=$(( (hour * 60 + minute) / DAYTIME_HEARTBEAT_INTERVAL_MIN ))
-  slot_key="$(date +%Y%m%d)-$slot_num"
+  # After closing message, keep quiet for the rest of the day.
+  # We treat END_HOUR as closing slot (only at HH:00), not a full active hour.
+  if [[ "$hour" -eq "$DAYTIME_HEARTBEAT_END_HOUR" ]]; then
+    if [[ "$minute" -eq 0 ]]; then
+      emit_smalltalk_once_per_day "closing" "$DAYTIME_CLOSING_FILE"
+    fi
+    return
+  fi
+
+  queue_depth="$(read_queue_depth_metric)"
+  queue_lag_p95="$(read_queue_lag_p95_ms)"
+  current_mode="$(cat /tmp/beatless_exec_mode 2>/dev/null || echo "daily")"
+  heartbeat_interval_min="$DAYTIME_HEARTBEAT_INTERVAL_IDLE_MIN"
+  heartbeat_profile="idle"
+
+  if [[ "$queue_depth" -ge "$DAYTIME_HEARTBEAT_BUSY_QUEUE_DEPTH_THRESHOLD" ]] || \
+     [[ "$queue_lag_p95" -ge "$DAYTIME_HEARTBEAT_BUSY_QUEUE_LAG_P95_MS" ]] || \
+     [[ ",$DAYTIME_HEARTBEAT_BUSY_MODES," == *",$current_mode,"* ]]; then
+    heartbeat_interval_min="$DAYTIME_HEARTBEAT_INTERVAL_BUSY_MIN"
+    heartbeat_profile="busy"
+  fi
+
+  slot_num=$(( (hour * 60 + minute) / heartbeat_interval_min ))
+  slot_key="$(date +%Y%m%d)-${heartbeat_profile}-${heartbeat_interval_min}-$slot_num"
   current_slot="$(cat "$DAYTIME_SLOT_FILE" 2>/dev/null || true)"
   if [[ "$current_slot" == "$slot_key" ]]; then
     return
@@ -156,12 +232,12 @@ emit_daytime_heartbeat_if_due() {
 
   echo "$slot_key" > "$DAYTIME_SLOT_FILE"
 
-  local queue_depth
-  queue_depth="$(read_queue_depth_metric)"
+  local heartbeat_chat_id
+  heartbeat_chat_id="$(resolve_daytime_chat_id || true)"
 
-  if [[ "$DAYTIME_HEARTBEAT_SEND_ENABLED" == "true" && -n "$DAYTIME_HEARTBEAT_CHAT_ID" ]]; then
-    EVENT_SIGNAL_SEND_ENABLED=true FEISHU_TARGET_CHAT_ID="$DAYTIME_HEARTBEAT_CHAT_ID" \
-      bash "$SCRIPTS/event_signal_emit.sh" "heartbeat_status" "" "ok" "$queue_depth" "0" "$DAYTIME_HEARTBEAT_CHAT_ID" >/dev/null || true
+  if [[ "$DAYTIME_HEARTBEAT_SEND_ENABLED" == "true" && -n "$heartbeat_chat_id" ]]; then
+    EVENT_SIGNAL_SEND_ENABLED=true FEISHU_TARGET_CHAT_ID="$heartbeat_chat_id" \
+      bash "$SCRIPTS/event_signal_emit.sh" "heartbeat_status" "" "ok" "$queue_depth" "0" "$heartbeat_chat_id" >/dev/null || true
   else
     bash "$SCRIPTS/event_signal_emit.sh" "heartbeat_status" "" "ok" "$queue_depth" "0" >/dev/null || true
   fi
@@ -169,9 +245,7 @@ emit_daytime_heartbeat_if_due() {
   if [[ "$hour" -eq "$DAYTIME_HEARTBEAT_START_HOUR" ]]; then
     emit_smalltalk_once_per_day "morning" "$DAYTIME_MORNING_FILE"
   fi
-  if [[ "$hour" -eq "$DAYTIME_HEARTBEAT_END_HOUR" ]]; then
-    emit_smalltalk_once_per_day "closing" "$DAYTIME_CLOSING_FILE"
-  fi
+  # Closing is handled above in dedicated quiet-hour logic.
 }
 
 run_automation_tick_if_due() {

@@ -18,6 +18,7 @@ DISPATCH_EVENTS="$BEATLESS/metrics/dispatch-events.jsonl"
 RESULTS_DIR="$BEATLESS/dispatch-results"
 ACK_LEDGER="$BEATLESS/metrics/ack-sent-task-ids.txt"
 ACK_LEDGER_LOCK="$BEATLESS/metrics/ack-sent-task-ids.lock"
+LAST_CHAT_ID_FILE="$BEATLESS/metrics/last-feishu-chat-id.txt"
 ROUTER="$SCRIPTS/route_task.sh"
 DISPATCH_SUBMIT="$SCRIPTS/dispatch_submit.sh"
 CAPTURE_SCRIPT="/home/yarizakurahime/.openclaw/workspace-lacia/skills/visual-proof/scripts/capture_url.sh"
@@ -26,13 +27,61 @@ CAPTURE_BLOG_URL="${CAPTURE_BLOG_URL:-http://127.0.0.1:3000}"
 CAPTURE_BLOG_ALT_URL="${CAPTURE_BLOG_ALT_URL:-http://127.0.0.1:4321}"
 CAPTURE_AUTO_START_BLOG_DEV="${CAPTURE_AUTO_START_BLOG_DEV:-true}"
 BLOG_BOOT_PID=""
-INGRESS_PHRASE_ENABLED="${INGRESS_PHRASE_ENABLED:-true}"
+INGRESS_PHRASE_ENABLED="${INGRESS_PHRASE_ENABLED:-false}"
+INGRESS_PHRASE_FALLBACK_KEY="${INGRESS_PHRASE_FALLBACK_KEY:-welcome_back}"
 ACK_STDOUT_MODE="${ACK_STDOUT_MODE:-once}"
 START_MS="$(python3 - <<'PY'
 import time
 print(int(time.time()*1000))
 PY
 )"
+
+resolve_target_chat_id() {
+  if [[ -n "${FEISHU_TARGET_CHAT_ID:-}" ]]; then
+    printf '%s\n' "$FEISHU_TARGET_CHAT_ID"
+    return
+  fi
+  if [[ -f "$LAST_CHAT_ID_FILE" ]]; then
+    local cached
+    cached="$(tr -d '\r\n' < "$LAST_CHAT_ID_FILE" 2>/dev/null || true)"
+    if [[ -n "$cached" ]]; then
+      printf '%s\n' "$cached"
+      return
+    fi
+  fi
+  python3 - "$BEATLESS/metrics/event-signals.jsonl" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+if not path.exists():
+    raise SystemExit(0)
+rows = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+for raw in reversed(rows):
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        continue
+    target = str(obj.get("target_chat_id") or "").strip()
+    if target:
+        print(target)
+        raise SystemExit(0)
+PY
+}
+
+persist_target_chat_id() {
+  local target="$1"
+  if [[ -z "$target" ]]; then
+    return
+  fi
+  mkdir -p "$(dirname "$LAST_CHAT_ID_FILE")"
+  printf '%s\n' "$target" > "${LAST_CHAT_ID_FILE}.tmp"
+  mv "${LAST_CHAT_ID_FILE}.tmp" "$LAST_CHAT_ID_FILE"
+}
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: $0 \"REQUEST_TEXT\" [OWNER_AGENT] [EXECUTOR_TOOL] [TASK_ID] [TIMEOUT_OVERRIDE] [EXPECT_REGEX] [EXPECT_EXACT_LINE] [MODEL_OVERRIDE] [TRACE_ID]" >&2
@@ -52,6 +101,9 @@ TRACE_ID="${9:-}"
 if [[ -z "$TRACE_ID" ]]; then
   TRACE_ID="trace-${TASK_ID}-$(date +%s)"
 fi
+
+TARGET_CHAT_ID="$(resolve_target_chat_id || true)"
+persist_target_chat_id "$TARGET_CHAT_ID"
 
 mkdir -p "$REPORT_ACK_DIR" "$REPORT_DIR" "$RESULTS_DIR" "$BEATLESS/metrics" "$BEATLESS/logs"
 touch "$ACK_LEDGER"
@@ -262,6 +314,27 @@ if [[ "$FASTPATH_DONE" != "true" ]]; then
       "$DISPATCH_SUBMIT" "$TASK_ID" "$OWNER_AGENT" "$EXECUTOR_TOOL" "$REQUEST_TEXT" "" "$EXPECT_REGEX" "$EXPECT_EXACT_LINE" "$MODEL_OVERRIDE" "" "" "$TRACE_ID" >/dev/null
     fi
     QUEUE_STATE="queued"
+  else
+    OUT_FILE="$REPORT_DIR/${TASK_ID}-cli-output.md"
+    RESULT_FILE="$RESULTS_DIR/${TASK_ID}.json"
+    NOW_ISO="$(date -Iseconds)"
+    {
+      echo "# CLI Output: $TASK_ID"
+      echo "trace_id: $TRACE_ID"
+      echo "tool: none"
+      echo "started: $NOW_ISO"
+      echo "---"
+      echo "No executor tool resolved by routing."
+      echo "This message was accepted but not dispatched."
+      echo "Likely daily QA or missing task intent."
+      echo "---"
+      echo "exit_code: 2"
+      echo "finished: $NOW_ISO"
+    } > "$OUT_FILE"
+    printf '{"task_id":"%s","trace_id":"%s","status":"failed","failure_type":"no_executor_routed","executor_tool":"none","output_path":"%s","started_at":"%s","finished_at":"%s","exit_code":2}\n' \
+      "$TASK_ID" "$TRACE_ID" "$OUT_FILE" "$NOW_ISO" "$NOW_ISO" > "$RESULT_FILE"
+    printf '{"ts":"%s","task_id":"%s","trace_id":"%s","tool":"none","status":"failed","exit_code":2,"failure_type":"no_executor_routed"}\n' \
+      "$NOW_ISO" "$TASK_ID" "$TRACE_ID" >> "$DISPATCH_EVENTS"
   fi
 fi
 
@@ -272,11 +345,12 @@ maybe_emit_ingress_phrase() {
   if [[ ! -x "$EVENT_SIGNAL" ]]; then
     return
   fi
-  if [[ -z "${FEISHU_TARGET_CHAT_ID:-}" ]]; then
+
+  local normalized phrase_key hour target_chat_id
+  target_chat_id="${TARGET_CHAT_ID:-}"
+  if [[ -z "$target_chat_id" ]]; then
     return
   fi
-
-  local normalized phrase_key hour
   normalized="$(printf '%s' "$REQUEST_TEXT" | tr '[:upper:]' '[:lower:]')"
   phrase_key=""
 
@@ -295,9 +369,13 @@ maybe_emit_ingress_phrase() {
     fi
   fi
 
+  if [[ -z "$phrase_key" && -n "$INGRESS_PHRASE_FALLBACK_KEY" ]]; then
+    phrase_key="$INGRESS_PHRASE_FALLBACK_KEY"
+  fi
+
   if [[ -n "$phrase_key" ]]; then
-    EVENT_SIGNAL_SEND_ENABLED=true FEISHU_TARGET_CHAT_ID="$FEISHU_TARGET_CHAT_ID" \
-      "$EVENT_SIGNAL" "smalltalk.${phrase_key}" "" "ok" "0" "0" "$FEISHU_TARGET_CHAT_ID" >/dev/null || true
+    EVENT_SIGNAL_SEND_ENABLED=true FEISHU_TARGET_CHAT_ID="$target_chat_id" \
+      "$EVENT_SIGNAL" "smalltalk.${phrase_key}" "" "ok" "0" "0" "$target_chat_id" >/dev/null || true
   fi
 }
 
