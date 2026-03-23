@@ -115,6 +115,50 @@ if [[ -z "$OWNER_AGENT" || -z "$EXECUTOR_TOOL" ]]; then
   EXECUTOR_TOOL="$(printf '%s\n' "$ROUTE_OUT" | awk -F= '/^executor_tool=/{print $2}')"
 fi
 
+# Safety net: if routing still returns no executor for a clear task intent,
+# force a practical RawCli executor instead of failing with no_executor_routed.
+if [[ -z "$EXECUTOR_TOOL" ]]; then
+  readarray -t FORCED_ROUTE < <(python3 - "$REQUEST_TEXT" <<'PY'
+import re
+import sys
+
+text = (sys.argv[1] or "").strip()
+
+def has(pattern: str) -> bool:
+    return re.search(pattern, text, flags=re.IGNORECASE) is not None
+
+owner = ""
+tool = ""
+
+if has(r"(codex\s*cli|codexcli|\bcodex\b|用codex|让codex)"):
+    owner, tool = "methode", "codex_cli"
+elif has(r"(claude\s*generalist|claudecode|claude\s*code|\bclaude\b|用claude|让claude)"):
+    owner, tool = "methode", "claude_generalist_cli"
+elif has(r"(gemini\s*cli|\bgemini\b|用gemini|让gemini)"):
+    owner, tool = "snowdrop", "gemini_cli"
+elif has(r"(claude\s*architect\s*opus|architect\s*opus|opus|架构|系统设计)"):
+    owner, tool = "lacia", "claude_architect_opus_cli"
+elif has(r"(claude\s*architect\s*sonnet|architect\s*sonnet|sonnet)"):
+    owner, tool = "methode", "claude_architect_sonnet_cli"
+else:
+    has_action = has(
+        r"(帮我|请帮我|执行|维护|修代码|修复|改造|实现|排查|诊断|重构|拆解|后台执行|推进|跑起来|启动|部署|编译|测试)"
+    )
+    infra_heavy = has(r"(bash|脚本|heartbeat|路由|openclaw|skills?|冲突|崩溃|debug|日志|配置)")
+    if has_action:
+        owner = "methode"
+        tool = "codex_cli" if infra_heavy else "claude_generalist_cli"
+
+print(owner)
+print(tool)
+PY
+  )
+  if [[ "${#FORCED_ROUTE[@]}" -ge 2 ]]; then
+    [[ -n "${FORCED_ROUTE[0]}" ]] && OWNER_AGENT="${FORCED_ROUTE[0]}"
+    [[ -n "${FORCED_ROUTE[1]}" ]] && EXECUTOR_TOOL="${FORCED_ROUTE[1]}"
+  fi
+fi
+
 ACK_TIME="$(date -Iseconds)"
 ACK_FILE="$REPORT_ACK_DIR/${TASK_ID}-ack.md"
 
@@ -252,6 +296,7 @@ run_screenshot_fastpath() {
   export CAPTURE_FINISHED="$(date -Iseconds)"
   export CAPTURE_DURATION="$duration_sec"
   export CAPTURE_URL="$capture_url"
+  export CAPTURE_SCREENSHOT_PATH="$capture_png"
   python3 <<'PY'
 import json
 import os
@@ -273,6 +318,8 @@ result = {
 }
 if failure:
     result["failure_type"] = failure
+if status == "success" and os.environ.get("CAPTURE_SCREENSHOT_PATH"):
+    result["screenshot_path"] = os.environ["CAPTURE_SCREENSHOT_PATH"]
 
 event = {
     "ts": os.environ["CAPTURE_FINISHED"],

@@ -96,6 +96,34 @@ else
   record "FAIL" "route_contract_output" "missing_owner_or_executor"
 fi
 
+check_route_executor() {
+  local check_name="$1"
+  local prompt="$2"
+  local expected="$3"
+  local route_out executor rule_id
+  if ! route_out="$($SCRIPTS/route_task.sh "$prompt" 2>/dev/null)"; then
+    record "FAIL" "$check_name" "route_task_failed"
+    return
+  fi
+  executor="$(printf '%s\n' "$route_out" | awk -F= '/^executor_tool=/{print $2}')"
+  rule_id="$(printf '%s\n' "$route_out" | awk -F= '/^rule_id=/{print $2}')"
+  if [[ "$executor" == "$expected" ]]; then
+    record "PASS" "$check_name" "rule=${rule_id:-unknown} executor=$executor"
+  else
+    record "FAIL" "$check_name" "rule=${rule_id:-unknown} executor=${executor:-<empty>} expected=$expected"
+  fi
+}
+
+check_route_executor \
+  "route_explicit_codex_intent" \
+  "帮我修代码，之前改了很多bash文件，配置了时间heartbeat路由，可能和skills冲突，让codex诊断" \
+  "codex_cli"
+
+check_route_executor \
+  "route_explicit_execute_intent" \
+  "帮我执行，让claude generalist 帮我看一下哪些需要正确启动，可能之前配置了很多都配置错了，得启用具体的skills才可以" \
+  "claude_generalist_cli"
+
 if rg -q '^\s*owner_agent:' "$BEATLESS/TASKS.yaml" && rg -q '^\s*executor_tool:' "$BEATLESS/TASKS.yaml"; then
   record "PASS" "tasks_contract_fields" "owner/executor_present"
 else

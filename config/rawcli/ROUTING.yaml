@@ -5,8 +5,50 @@
 version: 3
 
 routing_rules:
+  - id: explicit-codex-cli
+    pattern: "(?i)(codex\\s*cli|codexcli|\\bcodex\\b|用codex|让codex)"
+    owner_agent: methode
+    executor_tool: codex_cli
+    priority: 140
+    mode: daily
+
+  - id: explicit-claude-cli
+    pattern: "(?i)(claude\\s*generalist|claudecode|claude\\s*code|\\bclaude\\b|用claude|让claude)"
+    owner_agent: methode
+    executor_tool: claude_generalist_cli
+    priority: 139
+    mode: daily
+
+  - id: explicit-gemini-cli
+    pattern: "(?i)(gemini\\s*cli|\\bgemini\\b|用gemini|让gemini)"
+    owner_agent: snowdrop
+    executor_tool: gemini_cli
+    priority: 138
+    mode: daily
+
+  - id: ops-diagnose-and-fix
+    pattern: "诊断|排查|冲突|崩溃|修代码|修复|检查.*配置|skills?.*开启|脚本.*重构|bash.*(改|重构|修复)|路由.*问题"
+    owner_agent: methode
+    executor_tool: codex_cli
+    priority: 132
+    mode: daily
+
+  - id: explicit-execute-intent
+    pattern: "帮我执行|帮我维护|后台执行|推进这个任务|请执行|帮我做|请帮我"
+    owner_agent: methode
+    executor_tool: claude_generalist_cli
+    priority: 131
+    mode: daily
+
+  - id: progress-query
+    pattern: "进度|到哪里了|status|查看.*任务|任务.*状态|完成了吗|处理到哪"
+    owner_agent: kouka
+    executor_tool: claude_generalist_cli
+    priority: 126
+    mode: daily
+
   - id: quick-response
-    pattern: "快速|查一下|看一下|截图|截屏|verify quickly|screenshot|screen shot|check status|验证一下"
+    pattern: "快速|截图|截屏|verify quickly|screenshot|screen shot|check status"
     owner_agent: kouka
     executor_tool: null
     priority: 120

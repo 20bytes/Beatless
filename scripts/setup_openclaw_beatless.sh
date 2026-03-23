@@ -7,6 +7,8 @@ CONFIG_FILE="${OPENCLAW_HOME}/openclaw.json"
 BACKUP_FILE="${OPENCLAW_HOME}/openclaw.json.bak.beatless.$(date +%Y%m%d-%H%M%S)"
 SKILLS_SRC="/home/yarizakurahime/claw/openclaw/skills"
 SHARED_DIR="${OPENCLAW_HOME}/beatless"
+RAWCLI_CONFIG_DIR="${BASE_DIR}/config/rawcli"
+RAWCLI_SCRIPTS_DIR="${BASE_DIR}/scripts/rawcli"
 AUTH_SOURCE_PRIMARY="${OPENCLAW_HOME}/agents/taizi/agent/auth-profiles.json"
 AUTH_SOURCE_FALLBACK="${OPENCLAW_HOME}/agents/main/agent/auth-profiles.json"
 
@@ -169,6 +171,33 @@ EOF
 EOF
 }
 
+sync_rawcli_runtime_assets() {
+  local backup_dir
+  backup_dir="${SHARED_DIR}/backups/runtime-sync-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "${backup_dir}/scripts" "${SHARED_DIR}/scripts" "${SHARED_DIR}/templates"
+
+  for cfg in ROUTING.yaml TOOL_POOL.yaml; do
+    if [[ -f "${SHARED_DIR}/${cfg}" ]]; then
+      cp "${SHARED_DIR}/${cfg}" "${backup_dir}/${cfg}"
+    fi
+  done
+
+  for script_name in route_task.sh dispatch_submit.sh rawcli_ingress_ack_submit.sh rawcli_healthcheck.sh; do
+    if [[ -f "${SHARED_DIR}/scripts/${script_name}" ]]; then
+      cp "${SHARED_DIR}/scripts/${script_name}" "${backup_dir}/scripts/${script_name}"
+    fi
+  done
+
+  cp "${RAWCLI_CONFIG_DIR}/ROUTING.yaml" "${SHARED_DIR}/ROUTING.yaml"
+  cp "${RAWCLI_CONFIG_DIR}/TOOL_POOL.yaml" "${SHARED_DIR}/TOOL_POOL.yaml"
+  cp "${RAWCLI_CONFIG_DIR}/event-phrases.yaml" "${SHARED_DIR}/templates/event-phrases.yaml"
+
+  local script
+  for script in "${RAWCLI_SCRIPTS_DIR}"/*.sh; do
+    install -m 755 "$script" "${SHARED_DIR}/scripts/$(basename "$script")"
+  done
+}
+
 patch_openclaw_config() {
   cp "${CONFIG_FILE}" "${BACKUP_FILE}"
 
@@ -259,6 +288,7 @@ main() {
   sync_auth_profiles "lacia"
   sync_auth_profiles "methode"
 
+  sync_rawcli_runtime_assets
   patch_openclaw_config
 
   echo "Beatless setup complete."

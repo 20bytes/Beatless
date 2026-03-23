@@ -19,8 +19,9 @@ Beatless is a RawCli-first orchestration profile for OpenClaw.
 ## Repository Layout
 
 - `docs/`: architecture, routing, validation, runtime hardening
-- `souls/`: slim Soul definitions for 5 core agents
+- `souls/`: slim Soul definitions + AGENTS contracts for 5 core agents
 - `scripts/`: setup/bootstrap and operational scripts
+- `config/runtime/openclaw.runtime-overlay.redacted.json`: current runtime overlay snapshot (redacted)
 
 Archived legacy docs are moved to `docs/_archived/`.
 
