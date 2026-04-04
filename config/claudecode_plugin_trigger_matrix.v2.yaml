@@ -38,6 +38,7 @@ plugins:
 
   agent_teams:
     namespace: "/agent-teams"
+    runtime_model: "inherit -> kimi k2.5"
     core_commands:
       - team-spawn
       - team-feature
@@ -52,6 +53,7 @@ plugins:
       - dependency-aware execution
     hard_rules:
       - "Only use for complex tasks that can be decomposed into non-overlapping streams"
+      - "AgentTeams teammates must use model=inherit so the parent Kimi K2.5 route is preserved"
       - "Must define owned files per stream before spawn"
       - "If team state becomes unstable, fallback to single-lane ClaudeBuildCli"
 

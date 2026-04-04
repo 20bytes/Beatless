@@ -41,6 +41,7 @@ Primary commands:
 Hard behavior:
 - requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
 - best with `teammateMode=tmux`.
+- teammates use `model: inherit` and must inherit parent route `kimi k2.5`.
 - must define file ownership/dependency before parallel spawn.
 
 ### 2.3 RalphLoop plugin (`/ralph-loop:*`)
