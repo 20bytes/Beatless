@@ -848,7 +848,7 @@
         "enabled": true,
         "config": {
           "enabled": true,
-          "baseUrl": "http://127.0.0.1:3000",
+          "baseUrl": "http://127.0.0.1:3001",
           "requestTimeoutSec": 20,
           "openRoomDir": "/home/yarizakurahime/claw/OpenRoom",
           "devCommand": "pnpm --dir /home/yarizakurahime/claw/OpenRoom dev",
