@@ -1,30 +1,33 @@
-﻿# TOOLS.md - StepClaw2-Kouka
-## Plane Separation
-- Main Soul is control protocol and governance.
-- Plugin Router tools are external execution adapters.
-- Keep both planes separate in prompts and tasks.
-## Plugin Routing Preference
-- architecture and prompt/context/harness design -> ClaudeArchitectCli
-- coding implementation and iteration -> ClaudeBuildCli
-- review and complex patch validation -> CodexReviewCli
-- live engineering docs/SDK/API search -> SearchCli
-- deep research and evidence synthesis -> GeminiResearchCli
-- final control synthesis -> active main soul plus Satonus gate
-## V2 ClaudeCode Harness Policy
-- Policy source: `Beatless/config/claudecode_plugin_trigger_matrix.v2.yaml`.
-- Role default: Kouka prioritizes integration/release quality, typically using `agent-teams:team-review` plus final `codex` gate.
-- Avoid deep long-form debug loops unless delegated by Lacia or Methode.
-## Model Usage Snapshot
-- main dialogue baseline: stepfun/step-3.5-flash
-- image understanding: gemini-3-flash-preview via GeminiResearchCli
-- pdf understanding: SearchCli + minimax-pdf workflow
-- subagent baseline: stepfun/step-3.5-flash
-## Local Notes Placeholder
-- Add endpoint checks here without secrets.
-- Add per lane retry and timeout notes here.
-## Search Reliability Policy
-- Do not rely on builtin `web_search` when it returns auth errors.
-- Primary search path is plugin tool `search_cli`.
-- For URL extraction and page parsing, use `web_fetch` only after `search_cli` returns candidate links.
-- If `search_cli` fails, times out, or returns no URL, route to plugin tool `gemini_research_cli`.
-- Do not use `sessions_spawn` for routine search dispatch unless explicitly requested by user.
+# TOOLS.md - StepClaw2-Kouka
+
+## Execution Lane
+- `claude_code_cli` (rc / rc_code): used for delivery packaging and stop-loss decisions only.
+
+## Model
+- Main dialogue: minimax/MiniMax-M2.7
+- Execution channel: claude_code_cli → claude-sonnet-4-6
+
+## GSD Commands (via rc) — Default Tool / Override matrix
+
+| Command | Purpose | Default Tool | Override Condition |
+|---------|---------|--------------|--------------------|
+| `/gsd-verify-work` | UAT verification before delivery | Codex (strict gate) | Gemini for broad regression over large scope |
+| `/gsd-ship <artifact>` | Package + ship deliverable | Codex | — |
+| `/gsd-session-report` | Round-up report generation | Codex | Gemini for narrative polish |
+| `/gemini:challenge <decision>` | External pressure-test | Gemini (adversarial) | — |
+| `/gsd-pause-work` | Graceful pause on stop-loss | local (no rc) | — |
+| `/gsd-undo <target>` | Rollback deliverable | Codex (surgical) | — |
+
+Kouka owns the final gate: no delivery without Satonus PASS. Stop-loss is always a valid outcome.
+
+## Stop-Loss Triggers
+| Condition | Action |
+|-----------|--------|
+| Task stalled >24h with no diff | Mark `wontfix`, log reason, notify Lacia |
+| 2 consecutive heartbeats, same status | Re-queue with priority bump |
+| Satonus REJECT ≥2 times same task | Mark `blocked`, move out of current cycle |
+
+## Delivery Checklist
+- Satonus PASS required before delivery.
+- seen_issues updated after every delivery.
+- No task may hang indefinitely — stop-loss is always a valid outcome.
