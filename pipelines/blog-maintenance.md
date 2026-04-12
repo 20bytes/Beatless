@@ -1,22 +1,22 @@
 ---
-description: "Audit, clean, research, and write blog posts at ~/blog/. Uses Codex CLI + Gemini CLI for quality review."
+name: blog-maintenance
+description: "Autonomous blog maintenance pipeline for ~/blog/ (Astro site). Audits existing posts, researches trending AI/ML topics via Gemini (gemini:gemini-consult agent), writes new posts, verifies build, and reviews quality via Codex (codex:codex-rescue agent). Use this skill when the user mentions blog maintenance, writing blog posts, auditing blog content, researching topics for the blog, or wants to update their technical blog."
 ---
 
 # Blog Maintenance Pipeline
 
-Autonomous pipeline: audit existing posts → research trending topics → write new posts → verify build + triple review.
+Autonomous pipeline: audit existing posts -> research trending topics (Gemini agent) -> write new posts -> verify build -> quality review (Codex + Gemini agents).
+
+## Why This Architecture
+
+Previous versions put Codex/Gemini calls inside a `claude --print` prompt, where Claude could skip the Bash calls. This skill uses Claude Code's **Agent tool** to spawn `codex:codex-rescue` and `gemini:gemini-consult` as independent subagents that must execute.
 
 ## Execution Model
 
-**CRITICAL**: Do NOT use `/codex:review` or `/gemini:consult` slash commands — they don't work in `--print` mode. Instead, call CLIs directly via Bash:
-
-```bash
-# Codex review (read-only)
-cd ~/blog && codex --approval-mode full-auto --quiet "<review prompt>"
-
-# Gemini research (1M context)
-gemini -p "<research prompt>"
-```
+- **Claude**: Primary writer, auditor, and orchestrator via Read/Write/Grep/Glob tools
+- **Gemini**: Research agent via `Agent` tool with `subagent_type: "gemini:gemini-consult"` (1M context window, good for broad research)
+- **Codex**: Quality review agent via `Agent` tool with `subagent_type: "codex:codex-rescue"`
+- **Build**: `pnpm build` via Bash
 
 ## Context
 
@@ -24,58 +24,61 @@ gemini -p "<research prompt>"
 - Content path: `~/blog/src/content/blogs/<slug>/index.mdx`
 - Build command: `cd ~/blog && pnpm build`
 - Author: CS PhD, focus on AI/ML, EEG/BCI, agent systems
-- GitHub account: CrepuscularIRIS
+- GitHub: CrepuscularIRIS
 
-## Phase 1: AUDIT (existing posts)
+---
 
-Read all posts in `~/blog/src/content/blogs/*/index.mdx`.
+## Phase 1: AUDIT (Claude direct)
 
-Classify each post:
-- **KEEP**: >800 words, has code examples, well-structured, original content
+Read all posts in `~/blog/src/content/blogs/*/index.mdx` using Read/Glob tools.
+
+Classify each:
+- **KEEP**: >800 words, code examples, well-structured, original content
 - **REWRITE**: Good topic but poor execution — too short, missing depth, auto-generated feel
-- **DRAFT**: Low-value filler, placeholder, auto-digest with no substance → set `isDraft: true`
+- **DRAFT**: Low-value filler, placeholder → set `isDraft: true`
 
 Keep audit results in context for Phase 3.
 
-## Phase 2: RESEARCH (trending topics via Gemini CLI)
+---
 
-Use Gemini CLI directly for research:
+## Phase 2: RESEARCH (Gemini Agent)
 
-**Category A: AI Thought Leaders & Technical Reports**
-```bash
-gemini -p "Find the latest from these sources in the last 2 weeks:
-1. Andrej Karpathy — blog posts, YouTube videos, X/Twitter threads
-2. Anthropic — CAI training reports, Claude system card updates, research papers
-3. OpenAI — o-series technical reports, system prompts reveals, safety papers
-4. Google DeepMind — Gemini architecture papers, AlphaProof updates
-5. Key industry interviews — Dario Amodei, Sam Altman, Demis Hassabis
-For each: source URL, key quotes/insights, suggested blog angle."
+Spawn **gemini:gemini-consult** via Agent tool for each research category. These can run in parallel.
+
+### Agent: Research AI Thought Leaders
+
+```
+Research the latest from these sources in the last 2 weeks:
+1. Andrej Karpathy — blog posts, YouTube, X/Twitter
+2. Anthropic — research papers, Claude updates
+3. OpenAI — technical reports, system card updates
+4. Google DeepMind — Gemini papers, research
+5. Key industry interviews
+For each: source, key insights, suggested blog angle.
 ```
 
-**Category B: Flagship Model Architecture & Training**
-```bash
-gemini -p "Research the latest technical details about flagship model architectures:
-1. Claude's Constitutional AI training methodology
-2. GPT/o-series chain-of-thought reasoning
-3. Gemini's multimodal architecture and long-context
-4. DeepSeek's MoE architecture
-For each: key architectural insight, how it differs from competitors."
+### Agent: Research Agent Engineering
+
+```
+Most impactful developments in AI agent frameworks in the last 2 weeks?
+Focus on: MCP protocol, Claude Code / Codex / Gemini CLI patterns, autonomous coding agents, multi-agent orchestration.
+For each: title, key technical insight, practical code pattern.
 ```
 
-**Category C: Agent Engineering**
-```bash
-gemini -p "Most impactful developments in AI agent frameworks in the last 2 weeks? Focus on: MCP protocol, Claude Code / Codex / Gemini CLI patterns, autonomous coding agents, multi-agent orchestration. For each: title, key technical insight, practical code pattern."
+### Agent: Research BCI/Neuroscience (optional)
+
+```
+Search for the most discussed papers in brain-computer interfaces, neural decoding, EEG/fMRI from the last 14 days.
+List top 5 with title, key contribution, and blog post potential.
 ```
 
-**Category D: BCI/Neuroscience**
-```bash
-gemini -p "Search arXiv for the most discussed papers in brain-computer interfaces, neural decoding, EEG/fMRI from the last 14 days. List top 5 with title, key contribution, and blog post potential."
-```
+Select top 3 topics across all research results.
 
-Select top 3 topics across all categories.
-**Priority**: adapt/summarize existing high-quality content (Karpathy blogs, Anthropic reports, technical papers) rather than writing from scratch.
+**Priority**: Adapt/summarize existing high-quality content (Karpathy blogs, Anthropic reports, technical papers) over writing from scratch.
 
-## Phase 3: WRITE
+---
+
+## Phase 3: WRITE (Claude direct)
 
 ### New posts (write 2)
 
@@ -92,7 +95,7 @@ For each of the top 2 research topics:
    isDraft: false
    ---
    ```
-3. Write 1500+ words of high-quality content:
+3. Write 1500+ words:
    - Introduction with concrete hook (not "In this post we will...")
    - Technical depth with working code examples
    - Personal perspective or unique analysis angle
@@ -106,75 +109,82 @@ For each of the top 2 research topics:
 
 ### Rewrite (pick 1 from audit)
 
-If any posts were classified REWRITE:
-- Pick the one with the best topic potential
-- Rewrite with deeper analysis, better structure, code examples
-- Keep the same slug
+If any posts classified REWRITE, pick the best topic and rewrite with deeper analysis.
 
 ### Draft cleanup
 
-For posts classified DRAFT:
-- Set `isDraft: true` in frontmatter if not already set
-- Don't delete (user preference: ASK before deleting)
+For DRAFT posts: set `isDraft: true` in frontmatter. Never delete posts.
 
-## Phase 4: VERIFY
+---
 
-### Build check
+## Phase 4: VERIFY (Build + Parallel Agent Reviews)
+
+### Build check (Bash)
+
 ```bash
 cd ~/blog && pnpm build
 ```
-Must exit 0. If build fails, fix the issue.
 
-### Quality review via Codex CLI (triple check)
+Must exit 0. Fix if it fails.
 
-```bash
-cd ~/blog && codex --approval-mode full-auto --quiet \
-  "Review the recently changed blog posts in src/content/blogs/. Check for:
-   1. Technical accuracy — are claims correct?
-   2. Grammar and clarity — any awkward phrasing?
-   3. Code example correctness — do they compile/run?
-   4. Broken links or references
-   Output a quality score 1-10 per post and specific issues found."
+### Parallel quality reviews — spawn BOTH agents in a single message:
+
+#### Codex Review (codex:codex-rescue)
+
+```
+Review the recently changed blog posts in ~/blog/src/content/blogs/.
+Check for:
+1. Technical accuracy — are claims correct?
+2. Grammar and clarity — any awkward phrasing?
+3. Code example correctness — do they compile/run?
+4. Broken links or references
+Output a quality score 1-10 per post and specific issues found.
 ```
 
-### Architecture review via Gemini CLI
+#### Gemini Review (gemini:gemini-consult)
 
-```bash
-cd ~/blog && gemini -p \
-  "Review the blog content quality in src/content/blogs/. Check the most recent posts for:
-   1. Are the topics timely and relevant?
-   2. Is the technical depth sufficient for a PhD-level audience?
-   3. Are there any factual errors or misleading claims?
-   4. Quality score 1-10 per post."
+```
+Review the blog content quality in ~/blog/src/content/blogs/.
+Check the most recent posts for:
+1. Are the topics timely and relevant?
+2. Is the technical depth sufficient for a PhD-level audience?
+3. Are there any factual errors or misleading claims?
+4. Quality score 1-10 per post.
 ```
 
-### Commit
+Both agents must return results. If either finds critical issues (score < 6), address them before committing.
 
-If build passes and reviews are acceptable:
+### Commit (only if build passes and reviews acceptable)
+
 ```bash
 cd ~/blog && git add src/content/blogs/ && git commit -m "content: blog maintenance — new posts and cleanup"
 ```
 
 Do NOT push unless explicitly asked.
 
+---
+
 ## Phase 5: REPORT
 
-Output a summary:
+Output:
 - Posts audited (total, KEEP/REWRITE/DRAFT counts)
 - New posts written (slugs + topics + word counts)
 - Posts rewritten (slugs)
 - Posts marked as draft (slugs)
 - Build status (PASS/FAIL)
-- Codex review score
-- Gemini review score
+- Codex review scores
+- Gemini review scores
 - Paths to all modified files
+
+---
 
 ## Rules
 
-- NEVER delete a blog post — mark as draft at most
-- NEVER push to remote without explicit user request
-- NEVER invent citations — use Gemini CLI to verify URLs exist
-- If `pnpm build` fails, fix the error before committing
-- All posts must be in MDX format with valid frontmatter
-- **Use Bash to call `codex` and `gemini` CLI directly** — not plugin slash commands
-- Report progress after each phase
+1. **Spawn Gemini and Codex as Agent subagents** — real subprocesses, not prompt suggestions
+2. **Both must actually run** — verify you received results from both before proceeding
+3. **Never delete a blog post** — mark as draft at most
+4. **Never push** without explicit user request
+5. **Never invent citations** — use Gemini research to verify URLs exist
+6. **Build must pass** before committing
+7. **All posts in MDX format** with valid frontmatter
+8. **No AI filler language** — direct, specific, technical writing

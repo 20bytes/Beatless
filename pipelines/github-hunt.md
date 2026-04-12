@@ -1,27 +1,24 @@
 ---
-description: "Hunt critical bugs in 1K-10K star agent/LLM repos. Deep scan with Codex+Gemini+Claude. File issues for confirmed bugs, consider PR if maintainer responds."
+name: github-hunt
+description: "Autonomous bug hunting pipeline for 1K-10K star agent/LLM repos on GitHub. Discovers repos, clones, runs build verification, then performs independent triple review using Codex (via codex:codex-rescue agent), Gemini (via gemini:gemini-consult agent), and Claude's own analysis in parallel. Only files issues for bugs confirmed by >=2/3 reviewers. Use this skill whenever the user mentions hunting bugs, scanning GitHub repos, finding issues in open source projects, automated code auditing, or wants to discover and report bugs in agent/LLM repositories."
 ---
 
 # GitHub Issue Hunt Pipeline
 
-Autonomous pipeline: discover repos → clone → deep scan → triple review → file issues for confirmed critical bugs.
+Autonomous pipeline: discover repos -> clone -> build verify -> **parallel triple review** (Codex + Gemini + Claude) -> cross-validate -> file issues.
+
+## Why This Architecture
+
+Previous versions put Codex/Gemini calls inside a `claude --print` prompt, where Claude could (and did) skip the Bash calls entirely, fabricating "triple review" results from its own analysis alone. This skill fixes that by using Claude Code's **Agent tool** to spawn `codex:codex-rescue` and `gemini:gemini-consult` as independent subagents. These are real subprocesses that must execute — they cannot be skipped.
 
 ## Execution Model
 
-Claude Code is the main executor. For each repo analysis:
-- **Claude**: Primary code analysis via Read/Grep/Glob tools
-- **Codex CLI**: Code audit via `codex` CLI (Bash)
-- **Gemini CLI**: Architecture analysis via `gemini` CLI (Bash)
+- **Claude**: Primary analysis via Read/Grep/Glob tools + orchestration
+- **Codex**: Independent audit via `Agent` tool with `subagent_type: "codex:codex-rescue"`
+- **Gemini**: Independent analysis via `Agent` tool with `subagent_type: "gemini:gemini-consult"`
+- **GitHub CLI**: `gh` via Bash for search, clone, issue creation
 
-**CRITICAL**: Do NOT use `/codex:review` or `/gemini:consult` slash commands — they don't work in `--print` mode. Instead, call the CLIs directly via Bash:
-
-```bash
-# Codex review (read-only, full-auto approval)
-cd <repo> && codex --approval-mode full-auto --quiet "Review this codebase for critical bugs, security vulnerabilities, race conditions, and crashes. Focus only on P0/P1 severity. Output structured findings with file:line."
-
-# Gemini analysis (1M context)
-cd <repo> && gemini -p "Analyze this entire codebase for: (1) critical bugs causing crashes or data loss, (2) security vulnerabilities, (3) race conditions, (4) API contract violations. List only P0/P1 with exact file:line."
-```
+All three reviewers run **in parallel** as independent agents. Results are merged only after all three complete.
 
 ## Context
 
@@ -34,7 +31,7 @@ cd <repo> && gemini -p "Analyze this entire codebase for: (1) critical bugs caus
 
 ## Phase 1: DISCOVERY
 
-Search for agent/LLM repos:
+Search for agent/LLM repos using `gh` via Bash:
 
 ```bash
 gh search repos --stars=1000..10000 --sort=updated --limit=30 \
@@ -45,56 +42,102 @@ gh search repos --stars=1000..10000 --sort=updated --limit=30 \
 Filter criteria:
 - Has issues enabled, not archived, pushed in last 30 days
 - Not already in `~/workspace/archive/`
-- Must be related to: AI agents, LLM frameworks, inference engines, RAG pipelines
+- Related to: AI agents, LLM frameworks, inference engines, RAG pipelines
 - Prefer: Python, TypeScript, Go, Rust repos with active communities
 - Avoid: tutorial repos, awesome-lists, wrapper-only projects
 
-Select TOP 2 repos. Clone:
+Select TOP 2 repos. Clone via Bash:
 ```bash
 gh repo clone <owner/repo> ~/workspace/archive/<repo-name> -- --depth=1
 ```
 
 ---
 
-## Phase 2: DEEP SCAN (per repo)
+## Phase 2: BUILD VERIFICATION
 
-For EACH cloned repo, execute ALL THREE analysis passes:
+For each cloned repo, verify it builds before analysis. Run via Bash:
 
-### Pass 1: Claude Direct Analysis
+```bash
+cd ~/workspace/archive/<repo-name>
+
+# Detect and run build
+if [ -f go.mod ]; then go build ./... 2>&1; fi
+if [ -f package.json ]; then npm install && npm run build 2>&1; fi
+if [ -f pyproject.toml ] || [ -f setup.py ]; then pip install -e . 2>&1; fi
+if [ -f Cargo.toml ]; then cargo build 2>&1; fi
+```
+
+If build fails, note it but still proceed with static analysis (many bugs are findable without a working build).
+
+---
+
+## Phase 3: TRIPLE INDEPENDENT REVIEW (Parallel Agents)
+
+This is the critical phase. Spawn THREE independent agents in a SINGLE message using the Agent tool. All three must run — this is not optional.
+
+### Agent 1: Codex Review (codex:codex-rescue)
+
+Spawn with `subagent_type: "codex:codex-rescue"`:
+
+```
+Analyze the repository at ~/workspace/archive/<repo-name> for critical bugs.
+
+Focus on:
+1. Bugs that crash or corrupt data
+2. Security vulnerabilities (RCE, injection, SSRF, path traversal)
+3. Race conditions and concurrency bugs
+4. Missing error handling that causes panics/unhandled exceptions
+
+Only report P0/P1 severity. For each finding, provide:
+- File path and line number
+- Bug description (what's wrong)
+- Impact (what happens to users)
+- Suggested fix (one-liner)
+
+Output as structured text, one finding per section.
+```
+
+### Agent 2: Gemini Analysis (gemini:gemini-consult)
+
+Spawn with `subagent_type: "gemini:gemini-consult"`:
+
+```
+Analyze the repository at ~/workspace/archive/<repo-name> for critical bugs.
+
+Focus on:
+1. Crashes and data loss scenarios
+2. Security vulnerabilities exploitable by users
+3. Race conditions and deadlocks
+4. API contract violations and type mismatches
+
+Only report P0/P1 severity. For each finding, provide:
+- File path and line number
+- Bug description
+- Reproduction scenario
+- Severity justification
+
+Output as structured text, one finding per section.
+```
+
+### Agent 3: Claude Direct Analysis
+
+Use your own Read/Grep/Glob tools directly:
 
 ```bash
 cd ~/workspace/archive/<repo-name>
 ```
 
-Use Read, Grep, Glob tools:
 - Read entry points (main.go, main.py, src/index.ts, etc.)
 - Grep for dangerous patterns: `eval(`, `exec(`, `unsafe`, `panic(`, `os.Exit`, `TODO`, `FIXME`, `HACK`
 - Find error handling gaps: bare `except:`, empty `catch {}`, unchecked error returns
 - Look for race conditions, goroutine leaks, missing locks
-- Check for security issues: hardcoded secrets, SQL injection, path traversal, SSRF
+- Check for security issues: hardcoded secrets, SQL injection, path traversal
 
-Focus on **bugs that break functionality or crash the application**. Not style issues.
-
-### Pass 2: Codex CLI Audit (MANDATORY — via Bash)
-
-```bash
-cd ~/workspace/archive/<repo-name> && codex --approval-mode full-auto --quiet \
-  "Review this codebase. Find: (1) bugs that crash or corrupt data, (2) security vulnerabilities (RCE, injection, SSRF), (3) race conditions, (4) missing error handling that causes panics. Output structured JSON: [{file, line, severity, title, description}]. Only P0/P1."
-```
-
-Record Codex output verbatim. Do NOT invent findings.
-
-### Pass 3: Gemini CLI Analysis (MANDATORY — via Bash)
-
-```bash
-cd ~/workspace/archive/<repo-name> && gemini -p \
-  "Analyze this codebase for critical bugs. Focus on: (1) crashes and data loss, (2) security vulnerabilities exploitable by users, (3) race conditions, (4) API contract violations. Ignore style/docs. List only P0/P1 severity with exact file paths and line numbers."
-```
-
-Record Gemini output verbatim. Do NOT invent findings.
+Focus on bugs that break functionality or crash the application. Not style issues.
 
 ### Cross-reference with existing issues
 
+After all three agents complete, check existing issues:
 ```bash
 gh issue list --repo <owner/repo> --state open --limit 200 --json title,body,labels | head -500
 ```
@@ -103,55 +146,106 @@ Remove any finding that matches an existing open issue.
 
 ---
 
-## Phase 3: TRIPLE MERGE + QUALITY FILTER
+## Phase 4: CROSS-VALIDATION MERGE
 
-### Severity classification (ONLY keep bugs that break functionality)
+Only keep findings that meet ALL criteria:
 
-- **P0 (Critical)**: Crashes, data loss, RCE, SQL injection, authentication bypass
-- **P1 (High)**: Race conditions causing wrong results, API contract violations, resource leaks causing OOM, panics on malformed input
-- **P2+ (Skip)**: Style, docs, performance suggestions, test coverage → DO NOT INCLUDE
+1. **>=2/3 reviewers flagged it** — at least two of (Claude, Codex, Gemini) independently identified the same bug
+2. **Verified by reading code** — you (Claude) Read the actual file and line to confirm the bug exists
+3. **Real impact** — the bug affects actual users, not theoretical edge cases
+4. **Not already reported** — no matching open issue exists
+5. **P0 or P1 severity only**:
+   - P0: Crashes, data loss, RCE, SQL injection, authentication bypass
+   - P1: Race conditions causing wrong results, API contract violations, resource leaks causing OOM, panics on malformed input
 
-### Validation checklist (ALL must be true)
-
-- [ ] Bug is reproducible (you can describe exact steps)
-- [ ] Bug affects real users (not theoretical edge case)
-- [ ] Bug is not already reported
-- [ ] You verified the code path exists (Read the actual file and line)
-- [ ] At least 2 of 3 reviewers (Claude/Codex/Gemini) flagged it
-
-### Write proposal for each validated finding
-
-Save to `~/workspace/pr-stage/<date>-<repo>-finding-<N>.md`
+Save validated findings to `~/workspace/pr-stage/<date>-<repo>-finding-<N>.md`.
 
 ---
 
-## Phase 4: FILE ISSUES (for confirmed critical bugs only)
+## Phase 5: FILE ISSUES
 
-For each PASS finding that represents a **real bug breaking functionality** (not security-only):
+For each validated finding, create a GitHub issue via Bash. Follow the professional format below — no internal jargon, no mention of "multi-agent analysis", no "soul contracts" or system names.
 
 ```bash
 gh issue create --repo <owner/repo> \
   --title "<concise bug title>" \
-  --body "<markdown: Problem, file:line, reproduction steps, impact, suggested fix, 'Found via automated codebase analysis'>"
+  --body "$(cat <<'EOF'
+## Bug Description
+
+<2-3 sentences: what's broken, in plain language>
+
+## Location
+
+`<file>:<line>`
+
+## Reproduction
+
+1. <step 1>
+2. <step 2>
+3. <observe: crash/wrong result/security issue>
+
+## Impact
+
+<who is affected and how — data loss? crash? security exposure?>
+
+## Suggested Fix
+
+<brief description or pseudocode of the fix>
+
+---
+Found via automated codebase analysis. Happy to submit a PR if this is confirmed.
+EOF
+)"
 ```
 
-**Do NOT file issues for**: minor issues, style problems, "potential" vulnerabilities without reproduction, theoretical edge cases.
+### Issue Quality Rules (from mention.md)
 
-**Do NOT submit PRs** unless a maintainer responds to the issue and confirms it.
+The issue must read as if a competent engineer found the bug by reading the code:
+- **No internal workflow language** — don't mention agents, lanes, triple review, orchestration
+- **Problem -> Evidence -> Fix** — that's the only structure needed
+- **Be boring** — the most useful issues are the most straightforward ones
+- **One issue per bug** — don't bundle findings
+- **Minimal scope** — don't suggest refactors alongside the bug report
 
 ---
 
-## Phase 5: SUMMARY REPORT
+## Phase 6: SUMMARY REPORT
 
-Write to `~/workspace/pr-stage/hunt-summary-<date>.md` with: repos scanned, issues filed (URLs), rejected findings with reasons, Codex/Gemini evidence.
+Write to `~/workspace/pr-stage/hunt-summary-<date>.md`:
+
+```markdown
+# Hunt Summary — <date>
+
+## Repos Scanned
+- <repo1> (<stars> stars, <language>) — <N> findings
+- <repo2> (<stars> stars, <language>) — <N> findings
+
+## Issues Filed
+- <owner/repo>#<N>: <title> (P0/P1)
+
+## Rejected Findings
+- <finding>: <reason for rejection>
+
+## Evidence
+- Codex output: <summary of what Codex found>
+- Gemini output: <summary of what Gemini found>
+- Claude output: <summary of what Claude found>
+- Agreement matrix: <which reviewers agreed on which findings>
+
+## Build Status
+- <repo1>: PASS/FAIL
+- <repo2>: PASS/FAIL
+```
 
 ---
 
 ## Rules
 
-1. **Use Bash to call `codex` and `gemini` CLI directly** — not plugin slash commands
-2. **MUST `cd` into repo** before analysis
-3. **ONLY file issues for real bugs that break functionality**
-4. **At least 2/3 reviewers must agree** for a finding to pass
-5. **Verify before claiming** — Read the actual code
-6. Report progress after each phase
+1. **Spawn Codex and Gemini as parallel Agent subagents** — they are independent processes, not suggestions
+2. **Both Codex and Gemini must actually run** — check that you received results from both before proceeding to merge
+3. **>=2/3 agreement required** — a single reviewer's finding is not enough
+4. **Verify before claiming** — Read the actual code file and line
+5. **Professional issue format** — follow mention.md guidelines, no internal jargon
+6. **One issue per bug** — don't bundle
+7. **P0/P1 only** — skip style, docs, performance suggestions
+8. **Build first** — attempt build verification before analysis
