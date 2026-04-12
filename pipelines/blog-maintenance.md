@@ -1,10 +1,22 @@
 ---
-description: "Audit, clean, research, and write blog posts at ~/blog/. Uses AgentTeam+Codex+Gemini for quality."
+description: "Audit, clean, research, and write blog posts at ~/blog/. Uses Codex CLI + Gemini CLI for quality review."
 ---
 
 # Blog Maintenance Pipeline
 
-Autonomous pipeline: audit existing posts → research trending topics → write new posts → verify build.
+Autonomous pipeline: audit existing posts → research trending topics → write new posts → verify build + triple review.
+
+## Execution Model
+
+**CRITICAL**: Do NOT use `/codex:review` or `/gemini:consult` slash commands — they don't work in `--print` mode. Instead, call CLIs directly via Bash:
+
+```bash
+# Codex review (read-only)
+cd ~/blog && codex --approval-mode full-auto --quiet "<review prompt>"
+
+# Gemini research (1M context)
+gemini -p "<research prompt>"
+```
 
 ## Context
 
@@ -23,46 +35,45 @@ Classify each post:
 - **REWRITE**: Good topic but poor execution — too short, missing depth, auto-generated feel
 - **DRAFT**: Low-value filler, placeholder, auto-digest with no substance → set `isDraft: true`
 
-Write audit report (don't save to file, keep in context for Phase 3).
+Keep audit results in context for Phase 3.
 
-## Phase 2: RESEARCH (trending topics)
+## Phase 2: RESEARCH (trending topics via Gemini CLI)
 
-Use `/gemini:consult` to research topics in these categories:
+Use Gemini CLI directly for research:
 
 **Category A: AI Thought Leaders & Technical Reports**
-```
-/gemini:consult "Find the latest from these sources in the last 2 weeks:
+```bash
+gemini -p "Find the latest from these sources in the last 2 weeks:
 1. Andrej Karpathy — blog posts, YouTube videos, X/Twitter threads
-2. Anthropic — CAI (Constitutional AI) training reports, Claude system card updates, research papers
+2. Anthropic — CAI training reports, Claude system card updates, research papers
 3. OpenAI — o-series technical reports, system prompts reveals, safety papers
-4. Google DeepMind — Gemini architecture papers, AlphaProof/AlphaCode updates
-5. Key industry interviews — Dario Amodei, Sam Altman, Demis Hassabis, Ilya Sutskever
-For each: source URL, key quotes/insights, suggested blog angle. Prioritize deep technical content over announcements."
+4. Google DeepMind — Gemini architecture papers, AlphaProof updates
+5. Key industry interviews — Dario Amodei, Sam Altman, Demis Hassabis
+For each: source URL, key quotes/insights, suggested blog angle."
 ```
 
 **Category B: Flagship Model Architecture & Training**
-```
-/gemini:consult "Research the latest technical details about flagship model architectures:
-1. Claude's Constitutional AI training methodology and RLHF/RLAIF pipeline
-2. GPT/o-series chain-of-thought and reasoning architecture
-3. Gemini's multimodal architecture and long-context innovations
-4. Kimi's 200K+ context window implementation
-5. DeepSeek's MoE architecture and training efficiency
-For each: key architectural insight, training methodology, how it differs from competitors."
-```
-
-**Category C: Agent Engineering & Practical Patterns**
-```
-/gemini:consult "What are the most impactful developments in AI agent frameworks in the last 2 weeks? Focus on: MCP protocol, Claude Code / Codex / Gemini CLI patterns, autonomous coding agents, multi-agent orchestration, tool-use innovations. For each: title, key technical insight, practical code pattern."
+```bash
+gemini -p "Research the latest technical details about flagship model architectures:
+1. Claude's Constitutional AI training methodology
+2. GPT/o-series chain-of-thought reasoning
+3. Gemini's multimodal architecture and long-context
+4. DeepSeek's MoE architecture
+For each: key architectural insight, how it differs from competitors."
 ```
 
-**Category D: BCI/Neuroscience (author's research domain)**
-```
-/gemini:consult "Search arXiv for the most discussed papers in brain-computer interfaces, neural decoding, EEG/fMRI analysis from the last 14 days. List top 5 with title, key contribution, and blog post potential."
+**Category C: Agent Engineering**
+```bash
+gemini -p "Most impactful developments in AI agent frameworks in the last 2 weeks? Focus on: MCP protocol, Claude Code / Codex / Gemini CLI patterns, autonomous coding agents, multi-agent orchestration. For each: title, key technical insight, practical code pattern."
 ```
 
-Combine and rank topics. Select top 3 across all categories.
-**Priority**: adapt/summarize existing high-quality content (Karpathy blogs, Anthropic reports, technical papers) rather than writing from scratch. The blog should feel like curated expert analysis, not AI-generated filler.
+**Category D: BCI/Neuroscience**
+```bash
+gemini -p "Search arXiv for the most discussed papers in brain-computer interfaces, neural decoding, EEG/fMRI from the last 14 days. List top 5 with title, key contribution, and blog post potential."
+```
+
+Select top 3 topics across all categories.
+**Priority**: adapt/summarize existing high-quality content (Karpathy blogs, Anthropic reports, technical papers) rather than writing from scratch.
 
 ## Phase 3: WRITE
 
@@ -86,19 +97,17 @@ For each of the top 2 research topics:
    - Technical depth with working code examples
    - Personal perspective or unique analysis angle
    - Practical takeaways
-   - References with real URLs (verify via Gemini or web search)
+   - References with real URLs
 
 4. Writing quality rules:
    - NO AI filler: avoid "Let's dive in", "In conclusion", "It's worth noting"
    - Use direct statements, specific numbers, concrete examples
    - Code blocks must be syntactically correct and runnable
-   - Each section should teach something specific
 
 ### Rewrite (pick 1 from audit)
 
 If any posts were classified REWRITE:
 - Pick the one with the best topic potential
-- Read existing content
 - Rewrite with deeper analysis, better structure, code examples
 - Keep the same slug
 
@@ -114,32 +123,36 @@ For posts classified DRAFT:
 ```bash
 cd ~/blog && pnpm build
 ```
-Must exit 0. If build fails, fix the issue (usually frontmatter or MDX syntax).
+Must exit 0. If build fails, fix the issue.
 
-### Quality review (triple check)
+### Quality review via Codex CLI (triple check)
 
-Run all three reviews on the blog repo:
+```bash
+cd ~/blog && codex --approval-mode full-auto --quiet \
+  "Review the recently changed blog posts in src/content/blogs/. Check for:
+   1. Technical accuracy — are claims correct?
+   2. Grammar and clarity — any awkward phrasing?
+   3. Code example correctness — do they compile/run?
+   4. Broken links or references
+   Output a quality score 1-10 per post and specific issues found."
+```
 
-```
-/codex:review --wait
-```
-Check for: technical accuracy, grammar, code correctness, broken links.
+### Architecture review via Gemini CLI
 
+```bash
+cd ~/blog && gemini -p \
+  "Review the blog content quality in src/content/blogs/. Check the most recent posts for:
+   1. Are the topics timely and relevant?
+   2. Is the technical depth sufficient for a PhD-level audience?
+   3. Are there any factual errors or misleading claims?
+   4. Quality score 1-10 per post."
 ```
-/gemini:review --wait
-```
-Second opinion on content quality with Gemini's 1M context.
-
-```
-/codex:adversarial-review --wait
-```
-Challenge the writing choices — are the claims substantiated? Are code examples actually correct?
 
 ### Commit
 
-If build passes and review is acceptable:
+If build passes and reviews are acceptable:
 ```bash
-cd ~/blog && git add src/content/blogs/ && git commit -m "content: add new blog posts and audit existing"
+cd ~/blog && git add src/content/blogs/ && git commit -m "content: blog maintenance — new posts and cleanup"
 ```
 
 Do NOT push unless explicitly asked.
@@ -152,14 +165,16 @@ Output a summary:
 - Posts rewritten (slugs)
 - Posts marked as draft (slugs)
 - Build status (PASS/FAIL)
-- Codex review verdict
+- Codex review score
+- Gemini review score
 - Paths to all modified files
 
 ## Rules
 
 - NEVER delete a blog post — mark as draft at most
 - NEVER push to remote without explicit user request
-- NEVER invent citations — use Gemini to verify URLs exist
+- NEVER invent citations — use Gemini CLI to verify URLs exist
 - If `pnpm build` fails, fix the error before committing
 - All posts must be in MDX format with valid frontmatter
+- **Use Bash to call `codex` and `gemini` CLI directly** — not plugin slash commands
 - Report progress after each phase
