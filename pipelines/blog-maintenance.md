@@ -29,23 +29,40 @@ Write audit report (don't save to file, keep in context for Phase 3).
 
 Use `/gemini:consult` to research topics in these categories:
 
-**Category A: AI Big Three (御三家) — Anthropic, OpenAI, Google DeepMind**
+**Category A: AI Thought Leaders & Technical Reports**
 ```
-/gemini:consult "Find the latest interviews, technical reports, and blog posts from Anthropic (Claude team), OpenAI (GPT/o-series team), and Google DeepMind from the last 2 weeks. Focus on: executive interviews, system architecture reveals, safety/alignment papers, benchmark announcements. For each: source URL, key quotes, blog angle."
+/gemini:consult "Find the latest from these sources in the last 2 weeks:
+1. Andrej Karpathy — blog posts, YouTube videos, X/Twitter threads
+2. Anthropic — CAI (Constitutional AI) training reports, Claude system card updates, research papers
+3. OpenAI — o-series technical reports, system prompts reveals, safety papers
+4. Google DeepMind — Gemini architecture papers, AlphaProof/AlphaCode updates
+5. Key industry interviews — Dario Amodei, Sam Altman, Demis Hassabis, Ilya Sutskever
+For each: source URL, key quotes/insights, suggested blog angle. Prioritize deep technical content over announcements."
 ```
 
-**Category B: Agent/LLM Engineering**
+**Category B: Flagship Model Architecture & Training**
 ```
-/gemini:consult "What are the most impactful developments in AI agent frameworks, LLM serving, and inference optimization in the last 2 weeks? Focus on: new agent architectures, MCP protocol updates, tool-use patterns, RAG advances, context window innovations. For each: title, key technical insight, practical takeaway."
+/gemini:consult "Research the latest technical details about flagship model architectures:
+1. Claude's Constitutional AI training methodology and RLHF/RLAIF pipeline
+2. GPT/o-series chain-of-thought and reasoning architecture
+3. Gemini's multimodal architecture and long-context innovations
+4. Kimi's 200K+ context window implementation
+5. DeepSeek's MoE architecture and training efficiency
+For each: key architectural insight, training methodology, how it differs from competitors."
 ```
 
-**Category C: BCI/Neuroscience (author's research domain)**
+**Category C: Agent Engineering & Practical Patterns**
+```
+/gemini:consult "What are the most impactful developments in AI agent frameworks in the last 2 weeks? Focus on: MCP protocol, Claude Code / Codex / Gemini CLI patterns, autonomous coding agents, multi-agent orchestration, tool-use innovations. For each: title, key technical insight, practical code pattern."
+```
+
+**Category D: BCI/Neuroscience (author's research domain)**
 ```
 /gemini:consult "Search arXiv for the most discussed papers in brain-computer interfaces, neural decoding, EEG/fMRI analysis from the last 14 days. List top 5 with title, key contribution, and blog post potential."
 ```
 
-Combine and rank topics. Select top 3 (ideally 1 from each category).
-Prioritize: executive interviews and technical reports from the Big Three, practical engineering insights, breakthrough BCI papers.
+Combine and rank topics. Select top 3 across all categories.
+**Priority**: adapt/summarize existing high-quality content (Karpathy blogs, Anthropic reports, technical papers) rather than writing from scratch. The blog should feel like curated expert analysis, not AI-generated filler.
 
 ## Phase 3: WRITE
 
@@ -99,13 +116,24 @@ cd ~/blog && pnpm build
 ```
 Must exit 0. If build fails, fix the issue (usually frontmatter or MDX syntax).
 
-### Quality review
+### Quality review (triple check)
 
-Run `/codex:review` on the changed blog files for:
-- Technical accuracy
-- Grammar and clarity
-- Code example correctness
-- Broken links or references
+Run all three reviews on the blog repo:
+
+```
+/codex:review --wait
+```
+Check for: technical accuracy, grammar, code correctness, broken links.
+
+```
+/gemini:review --wait
+```
+Second opinion on content quality with Gemini's 1M context.
+
+```
+/codex:adversarial-review --wait
+```
+Challenge the writing choices — are the claims substantiated? Are code examples actually correct?
 
 ### Commit
 

@@ -70,25 +70,37 @@ Then use Read, Grep, Glob tools to deeply analyze the codebase:
 
 Focus on **critical issues that break functionality or compromise security**. Ignore style issues, documentation gaps, or minor code quality problems.
 
-### Pass 2: Codex Code Audit (MANDATORY — must actually call this)
+### Pass 2: Codex Audit (MANDATORY — must actually call these)
 
-Still in the repo directory, run:
-
-```
-/codex:review
-```
-
-This invokes the Codex CLI to perform an independent code review. Wait for its output and record the findings verbatim. Do NOT invent Codex findings.
-
-### Pass 3: Gemini Architecture Analysis (MANDATORY — must actually call this)
-
-Run:
+Still in the repo directory, run BOTH:
 
 ```
-/gemini:consult "Analyze the codebase at the current directory. Focus on: (1) critical bugs that would cause crashes or data loss in production, (2) security vulnerabilities exploitable by external users, (3) race conditions or concurrency bugs, (4) API contract violations that break client integrations. Ignore documentation, style, and minor issues. List only P0/P1 severity findings with exact file paths and line numbers."
+/codex:review --wait
+```
+Standard code review — catches bugs, security issues, code quality problems.
+
+```
+/codex:adversarial-review --wait
+```
+Challenge review — questions design choices, assumptions, and tradeoffs. Finds architectural flaws.
+
+Wait for both outputs and record findings verbatim. Do NOT invent Codex findings.
+
+### Pass 3: Gemini Deep Analysis (MANDATORY — must actually call these)
+
+Run the whole-codebase analysis (uses Gemini's 1M context window):
+
+```
+/gemini:analyze "Focus on: (1) critical bugs causing crashes or data loss, (2) security vulnerabilities exploitable by external users, (3) race conditions or concurrency bugs, (4) API contract violations. Ignore style/docs. List only P0/P1 with exact file:line."
 ```
 
-Record Gemini's findings verbatim. Do NOT invent Gemini findings.
+Also run a challenge review for maximum skepticism:
+
+```
+/gemini:challenge --wait
+```
+
+Record all findings verbatim. Do NOT invent Gemini findings.
 
 ### Cross-reference with existing issues
 
