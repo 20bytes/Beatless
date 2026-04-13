@@ -1,48 +1,50 @@
 ---
 name: github-pr
-description: "End-to-end open source contribution pipeline. Discovers fixable issues in agent/LLM repos (good first issue, help wanted, confirmed bugs), evaluates repo quality, sets up dev environment, runs tests to find/confirm bugs, plans fix via GSD2, implements with Codex, triple-reviews with Claude+Codex+Gemini against 8-item quality standard, then submits PR per seven-step workflow. Use whenever the user mentions contributing to open source, submitting PRs, fixing GitHub issues, building contributor reputation, finding good first issues, or wants to help agent/LLM projects."
+description: "End-to-end open source contribution engine with AutoPilot orchestration. Discovers fixable issues in agent/LLM repos, evaluates repo quality, sets up dev environment, runs tests to dynamically find/confirm bugs, debugs via GSD2 scientific method, plans fix with Planning-with-Files, implements with Codex (write-mode), researches architecture with Gemini (1M context), triple-reviews against 8-item quality standard, then submits PR per seven-step workflow. All bugs must be dynamically verified — no static-only findings. Use whenever the user mentions contributing to open source, submitting PRs, fixing GitHub issues, building contributor reputation, or wants to help agent/LLM projects."
 ---
 
-# GitHub PR Pipeline v5 — Unified Contribution Engine
+# GitHub PR Pipeline v6 — AutoPilot Contribution Engine
 
-End-to-end: discover fixable issues → evaluate repo → setup env → run tests → plan fix → implement → triple review → submit PR.
+End-to-end: discover → evaluate → setup → **run tests** → **GSD2 debug** → **plan fix** → **Codex implement** → **Gemini architecture check** → triple review → submit PR.
 
 ## Philosophy
 
-The goal is building a credible contributor profile, not spamming issues. Every PR must pass an 8-item quality gate before submission. The pipeline merges discovery (formerly github-hunt) with delivery (PR submission) into one flow: find something worth fixing, fix it properly, get it merged.
+Every bug must be proven by running code. Every fix must be verified by running tests. Every PR must pass triple review before submission. The pipeline uses each AI tool for what it does best:
 
-Key principles from research:
-- PR acceptance depends more on contributor reputation, communication quality, and scope control than on code cleverness
-- Maintainers value "low friction to review" above all — small scope, clear description, tests included
-- Start with docs/small bugs/test gaps, not architecture rewrites
-- One PR per issue, follow repo conventions exactly
+- **Claude**: Orchestration, root cause analysis, PR authoring, code reading
+- **Codex** (`codex:codex-rescue`): **Write-mode fix generation + debugging** — Codex excels at contained code changes and testing in its sandbox
+- **Gemini** (`gemini:gemini-consult`): **Architecture research + contextual review** — Gemini's 1M context is ideal for understanding large codebases and checking design-level correctness
 
-## Execution Model
+This matches the plugin contracts: Codex gets `--write` tasks, Gemini gets analysis/research tasks.
 
-- **Claude**: Orchestrator, code analysis, PR authoring, root cause analysis
-- **Codex** (`codex:codex-rescue` agent): Fix implementation (write mode) + independent code review
-- **Gemini** (`gemini:gemini-consult` agent): Architecture analysis + independent code review
-- **GSD2 methodology**: Plan before coding, debug systematically, verify before claiming done
-- **gh CLI**: Issue/repo search, fork, PR creation, status monitoring
-- **uv / npm / go**: Environment setup and test execution
+## AutoPilot Orchestration (GSD2 + Planning with Files)
+
+Use the **3-file pattern** for tracking progress:
+
+Create in `~/workspace/pr-stage/<repo-name>/`:
+- `task_plan.md` — phases with checkboxes, updated after each phase
+- `findings.md` — test results, stack traces, root cause notes
+- `progress.md` — timeline, decisions, blockers
+
+This persists state across tool calls and makes the pipeline resumable if interrupted.
 
 ## Context
 
 - Archive: `~/workspace/archive/`
 - Staging: `~/workspace/pr-stage/`
 - GitHub: `gh` authenticated as CrepuscularIRIS
-- Scoring rubric: `~/workspace/pr-stage/pr-scoring-rubric.md`
+- Rubric: `~/workspace/pr-stage/pr-scoring-rubric.md`
+- PR standard: `/home/yarizakurahime/claw/github/PR.md` (seven-step workflow)
+- Quality standard: `/home/yarizakurahime/claw/github/PullRequest.md` (8-item gate)
 
 ---
 
 ## Phase 1: DISCOVER FIXABLE ISSUES
 
-The best issues to fix are ones where the maintainer has already said "yes, this needs fixing."
-
-### Search strategy
+Search for issues that maintainers have explicitly welcomed:
 
 ```bash
-# Priority 1: good first issue in agent/LLM repos
+# Priority 1: good first issue
 gh search issues --label="good first issue" --state=open --sort=updated --limit=20 \
   --json repository,title,number,labels,createdAt,comments \
   -- "agent OR llm OR langchain OR rag OR mcp OR embedding"
@@ -52,138 +54,159 @@ gh search issues --label="help wanted" --state=open --sort=updated --limit=20 \
   --json repository,title,number,labels,createdAt,comments \
   -- "agent OR llm OR inference OR serving OR tool"
 
-# Priority 3: confirmed bugs with maintainer response
+# Priority 3: confirmed bugs
 gh search issues --label="bug" --state=open --sort=comments --limit=20 \
   --json repository,title,number,labels,createdAt,comments \
   -- "crash OR panic OR fix OR broken"
 ```
 
-### Issue selection criteria
-
-Pick issues that meet ALL of these:
-- **Maintainer acknowledged** — at least one comment from a repo member, not just the reporter
-- **Age >7 days** — not a fresh report that might be duplicate or invalid
-- **Clear scope** — reproduction steps, error message, or specific file mentioned
-- **Fixable in <100 lines** — manageable scope for building trust
-- **Not assigned** — respect other contributors' claimed work
-- **Repo has tests/CI** — so the fix can be verified
-
-Skip issues that are: feature requests disguised as bugs, design discussions, performance optimization debates, or "everything is broken" reports with no specifics.
+Selection criteria — ALL must be true:
+- Maintainer acknowledged (comment from repo member)
+- Age >7 days (not a fresh, possibly invalid report)
+- Clear scope (repro steps, error message, or specific file)
+- Fixable in <100 lines
+- Not assigned to someone else
+- Repo has test suite and CI
 
 ---
 
-## Phase 2: EVALUATE REPO QUALITY
+## Phase 2: EVALUATE REPO (Gemini research)
 
-Before investing time, check if the repo is contributor-friendly. Read these files:
+Use **Gemini** (`gemini:gemini-consult`) for repo evaluation — its 1M context can read CONTRIBUTING.md, recent PRs, and project structure in one pass:
 
-```bash
-cd ~/workspace/archive/<repo-name>
-# Check contributor infrastructure
-cat CONTRIBUTING.md 2>/dev/null | head -50
-cat .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null
-cat .github/CODEOWNERS 2>/dev/null | head -10
+```
+Read the repository at ~/workspace/archive/<repo-name> and evaluate:
+
+1. Read CONTRIBUTING.md — what are the PR requirements?
+2. Read .github/PULL_REQUEST_TEMPLATE.md — what format do they expect?
+3. Check recent 5 merged PRs — what commit style, description depth, test expectations?
+4. Read the module around the bug location — what design patterns are used?
+5. Is CI running? Are PRs being reviewed?
+
+Output: repo evaluation summary + PR format requirements for this specific repo.
 ```
 
-### Repo scorecard (all should be YES)
-
-- Has CONTRIBUTING.md or contributor guidelines?
-- Has PR template?
-- Recent commits in last 30 days?
-- PRs are being reviewed and merged (not ignored)?
-- CI is running on PRs?
-- Issues have maintainer responses?
-- Has `good first issue` / `help wanted` labels?
-
-If a repo fails 3+ of these, pick a different one. Investing in an unresponsive repo wastes time.
-
-### Read recent merged PRs
-
-```bash
-gh pr list --repo <owner/repo> --state merged --limit=5 --json title,body,files,reviews
-```
-
-Study how the maintainers like PRs formatted. What commit style? How detailed are descriptions? Do they expect tests? This tells you what "good" looks like for THIS specific repo.
+Skip repos that fail 3+ of: CONTRIBUTING.md, PR template, recent commits, maintainer responses, CI active, good-first-issue labels.
 
 ---
 
-## Phase 3: SETUP ENVIRONMENT
-
-Build a working dev environment. If this fails, try to fix dep issues. If still broken, skip this repo.
+## Phase 3: SETUP ENVIRONMENT + RUN TESTS
 
 ```bash
 cd ~/workspace/archive/<repo-name>
 
-# Fork + upstream tracking
+# Fork + upstream
 gh repo fork <owner/repo> --clone=false 2>/dev/null || true
 git remote add upstream https://github.com/<owner/repo>.git 2>/dev/null || true
 git fetch upstream && git checkout main && git pull upstream main
 
-# Python
-if [ -f pyproject.toml ] || [ -f setup.py ] || [ -f requirements.txt ]; then
+# Install deps
+if [ -f pyproject.toml ] || [ -f setup.py ]; then
   uv venv .venv && source .venv/bin/activate
-  uv pip install -e ".[dev,test]" 2>&1 || uv pip install -e ".[dev]" 2>&1 || uv pip install -e . 2>&1
-  [ -f requirements-dev.txt ] && uv pip install -r requirements-dev.txt 2>&1
+  uv pip install -e ".[dev,test]" 2>&1 || uv pip install -e . 2>&1
 fi
-
-# Go
 if [ -f go.mod ]; then go mod download && go build ./... 2>&1; fi
-
-# Node.js
 if [ -f package.json ]; then npm install && npm run build 2>&1 || true; fi
 ```
 
-### Establish test baseline
+### Run full test suite — establish baseline
 
-Run the full test suite BEFORE making any changes:
 ```bash
-pytest --tb=short -q 2>&1 | tail -10  # or go test / npm test
+pytest --tb=short -q 2>&1 | tee ~/workspace/pr-stage/<repo>/baseline-tests.log
+# or: go test -race -v ./... | tee ...
+# or: npm test | tee ...
 ```
 
-Record pass/fail counts. After the fix, this must be equal or better.
+Record pass/fail counts. After the fix, tests must be equal or better.
 
 ---
 
-## Phase 4: REPRODUCE AND UNDERSTAND THE BUG
+## Phase 4: REPRODUCE THE BUG (Dynamic verification required)
 
-Before writing any code, prove you understand the problem.
+Follow the issue's repro steps exactly. If the issue describes a test failure, run that test:
 
-### Read the issue thoroughly
 ```bash
-gh issue view <N> --repo <owner/repo> --json title,body,labels,comments
-```
-
-### Reproduce the bug
-
-If the issue includes repro steps, follow them exactly:
-```bash
-# Run the specific failing test or repro command from the issue
 pytest tests/test_specific.py::test_case -v --tb=long 2>&1
 ```
 
-If there's no repro in the issue, construct one from the description. If you can't reproduce it, leave a polite comment asking for more details — don't guess.
+**If the bug cannot be reproduced by running code, STOP.** Do not proceed with static-only analysis. Either:
+- Ask the maintainer for better repro steps (comment on the issue)
+- Pick a different issue
 
-### Trace root cause
-
-Read the stack trace or error output bottom-up:
-1. Which file:line in production code fails?
-2. What input/condition triggers it?
-3. Why does the current code handle it incorrectly?
-4. What's the minimal change to fix it?
-
-Write down your understanding as a 3-sentence root cause analysis. This goes in the PR description later.
+Save reproduction evidence to `findings.md`:
+- Exact command run
+- Full output/stack trace
+- Timestamp
 
 ---
 
-## Phase 5: PLAN THE FIX (GSD2 style)
+## Phase 5: GSD2 DEBUG — Root Cause Analysis
 
-Answer these before writing any code:
+Apply the GSD2 scientific method debugging pattern:
 
-- **Root cause** (1 sentence): Why does the bug exist?
-- **Fix location**: Which file(s) and line(s)?
-- **Fix approach** (1-3 sentences): What's the minimal change?
-- **Test strategy**: How to prove the fix works? Existing test? New test?
-- **Risk**: What could this change break? Any edge cases?
-- **Scope check**: Is this still <100 lines? If not, narrow it.
+### 5a. Gather symptoms
+- What exception/error/panic?
+- Which file:line in production code (not test code)?
+- What input triggers it?
+
+### 5b. Form hypothesis
+- Why does the current code fail?
+- What assumption is violated?
+
+### 5c. Test hypothesis
+Read the code at the crash site. Trace the execution path. Confirm:
+- Is this a logic error, missing null check, wrong type, race condition, or unhandled edge case?
+
+### 5d. For complex bugs — use Codex as debug assistant
+
+Spawn `codex:codex-rescue` in **diagnose mode** (read-only):
+```
+Debug this test failure in ~/workspace/archive/<repo-name>.
+
+Failing test: <test name>
+Stack trace:
+<paste stack trace>
+
+Read the source code at the crash site. What is the root cause?
+Do NOT fix it yet — just diagnose. Output a Root Cause Report:
+- Root cause (1 sentence)
+- Affected file:line
+- Why the current code is wrong
+- What the fix should be (description, not code)
+```
+
+### 5e. Write root cause analysis
+
+Save to `findings.md`:
+```
+## Root Cause: <issue title>
+- File: <file:line>
+- Cause: <1-2 sentences>
+- Fix approach: <1-2 sentences>
+- Confidence: HIGH/MEDIUM
+```
+
+---
+
+## Phase 6: PLAN FIX (Planning with Files)
+
+Update `task_plan.md`:
+```markdown
+# Fix Plan: <repo>#<issue>
+
+## Root Cause
+<from Phase 5>
+
+## Changes Required
+- [ ] `<file>:<line>` — <what to change>
+- [ ] Add/modify test: `<test file>`
+- [ ] Verify: `<test command>`
+
+## Risk Assessment
+- What could break: <description>
+- Edge cases: <list>
+- Scope check: <N lines, within 100 limit>
+```
 
 Create fix branch:
 ```bash
@@ -193,121 +216,127 @@ git checkout -b fix/<issue-slug>
 
 ---
 
-## Phase 6: IMPLEMENT THE FIX
+## Phase 7: IMPLEMENT FIX (Codex write-mode)
 
-### Simple fixes (<20 lines): Codex direct
+Codex excels at contained code changes. Use it in **write mode**:
 
-Spawn `codex:codex-rescue` agent:
+### Simple fixes (<20 lines)
+
+Spawn `codex:codex-rescue` with `--write`:
 ```
-Fix the bug in ~/workspace/archive/<repo-name> described in issue #<N>:
-<paste issue title + key details>
+Fix the bug in ~/workspace/archive/<repo-name> described in issue #<N>.
 
-Root cause: <your analysis from Phase 4>
-Affected file(s): <file:line>
+Root cause: <from Phase 5>
+File to change: <file:line>
+What to change: <specific description>
 
 Requirements:
 1. Minimal change — fix only the bug
-2. Follow the repo's existing code style exactly
-3. Add or modify a test that proves this specific bug is fixed
-4. Keep under 20 lines changed
+2. Match the repo's existing code style exactly
+3. Add or modify a test proving the fix
+4. Keep under 20 lines changed total
 ```
 
-### Complex fixes (20-100 lines): Claude + Codex + Gemini
+### Complex fixes (20-100 lines)
 
-1. **Gemini** (`gemini:gemini-consult`): "Explain the architecture around `<file:line>`. What design patterns and invariants must I preserve?"
-2. **Claude**: Write the fix based on root cause + Gemini's architecture insight
-3. **Codex** (`codex:codex-rescue`): "Review and refine this diff. Does it fix the bug without breaking invariants?"
+Use **parallel dispatch** (SuperPowers pattern):
 
-### After implementation
+1. **Gemini** (`gemini:gemini-consult`): "Read the full module around `<file>`. What design patterns, invariants, and interfaces must be preserved? What are the edge cases?"
 
-Verify the diff is clean:
+2. **Codex** (`codex:codex-rescue`): "Given this architecture context from Gemini: <paste>. Fix the bug at `<file:line>`. Follow the existing patterns exactly."
+
+### After implementation — verify the diff
+
 ```bash
 git diff --stat
 git diff
 ```
 
-Check: Is the diff <100 lines? Does it touch only relevant files? No debug prints, no commented-out code, no unrelated formatting changes?
+Check: <100 lines? Only relevant files? No debug prints, no commented-out code, no formatting noise?
 
 ---
 
-## Phase 7: VERIFY THE FIX
+## Phase 8: VERIFY (Dynamic only)
 
-Every fix must pass ALL verification gates.
-
-### 7a. Full test suite
+### 8a. Full test suite
 ```bash
 pytest --tb=short -q 2>&1
-# Compare against Phase 3 baseline — must be equal or better
+# Compare against Phase 3 baseline — MUST be equal or better
 ```
 
-If the fix breaks existing tests, debug and fix. Never submit with regressions.
-
-### 7b. Specific bug reproduction
+### 8b. Specific bug reproduction
 ```bash
-# The test/command that was failing must now pass
+# The test/command from Phase 4 must now PASS
 pytest tests/test_specific.py::test_case -v 2>&1
 ```
 
-### 7c. Lint/format check
+### 8c. Lint check
 ```bash
-# Follow whatever the repo uses
-ruff check . 2>/dev/null || true
-go vet ./... 2>/dev/null || true
-npm run lint 2>/dev/null || true
+ruff check . 2>/dev/null || go vet ./... 2>/dev/null || npm run lint 2>/dev/null || true
 ```
+
+If any test regresses → debug and fix before proceeding. Never submit with regressions.
 
 ---
 
-## Phase 8: TRIPLE REVIEW (Claude + Codex + Gemini)
+## Phase 9: TRIPLE REVIEW (Parallel dispatch)
 
-Spawn all three reviewers in PARALLEL. Each scores independently against the 8-item quality standard.
+Spawn all three reviewers in a SINGLE message using the **SuperPowers parallel dispatch** pattern. Each reviews independently.
 
-### Codex review (`codex:codex-rescue`)
+### Codex review (`codex:codex-rescue`) — focus: correctness + code quality
+
 ```
-Review this PR diff in ~/workspace/archive/<repo-name> against these 8 criteria.
-Score each 1-10:
+Review this git diff in ~/workspace/archive/<repo-name>.
 
-1. Direction correct — does this fix address a real, welcomed issue?
-2. Follows repo rules — matches CONTRIBUTING.md, code style, commit format?
-3. Small scope — only changes needed for the fix, nothing extra?
-4. Complete description — root cause explained, verification included?
-5. Verifiable — tests pass, reproduction command works?
-6. Code quality — clean diff, no debug artifacts, lint-clean?
-7. Correctness — actually fixes the bug? edge cases handled?
-8. No regressions — existing tests still pass?
+Score each dimension 1-10:
+1. Correctness — does it fix the root cause, not just the symptom?
+2. Minimality — only necessary lines changed?
+3. Code quality — matches repo style, clean diff, no artifacts?
+4. Test coverage — regression test exists, tests pass?
+5. No regressions — existing functionality preserved?
 
-Output: score table + PASS/FAIL verdict. FAIL if any dimension <5 or average <7.
-```
-
-### Gemini review (`gemini:gemini-consult`)
-```
-Review this PR diff for architectural correctness and social fit:
-
-1. Does the fix respect the module's design patterns?
-2. Are edge cases covered?
-3. Would a maintainer find this easy to review?
-4. Is the PR description clear and complete?
-5. Is the tone humble and professional?
-6. Would you merge this if you were the maintainer?
-
-Output: score table + PASS/FAIL verdict. Be strict.
+Output: | Dimension | Score | Justification |
+PASS if average >=7, FAIL otherwise. Be strict.
 ```
 
-### Claude self-review
+### Gemini review (`gemini:gemini-consult`) — focus: architecture + social fit
 
-Score the diff yourself using the rubric at `~/workspace/pr-stage/pr-scoring-rubric.md`.
+```
+Review this PR for ~/workspace/archive/<repo-name>.
+
+Read the diff AND the PR description draft. Score each dimension 1-10:
+1. Architecture fit — respects module design patterns and invariants?
+2. Edge cases — are boundary conditions handled?
+3. PR description — root cause explained, verification included, scope clear?
+4. Social fit — humble tone, no jargon, follows CONTRIBUTING.md?
+5. Maintainer perspective — would you merge this? Easy to review?
+
+Output: | Dimension | Score | Justification |
+PASS if average >=7, FAIL otherwise. Be strict.
+```
+
+### Claude self-review — focus: 8-item quality gate
+
+Score against the PullRequest.md standard:
+1. Direction correct (issue is welcomed)
+2. Follows repo rules (CONTRIBUTING.md, PR template)
+3. Small scope (one fix per PR)
+4. Complete description (background, purpose, verification)
+5. Verifiable (tests, repro command)
+6. Low friction communication (clear, humble)
+7. Follow-up ready (will handle review comments)
+8. Trust building (appropriate scope for contributor level)
 
 ### Gate decision
 
-- All three PASS + average >=7/10 → proceed to Phase 9
-- Any FAIL → fix the issues, re-run Phase 7-8
-- Average <7/10 → the fix needs more work before submitting
+- All three PASS + average >=7/10 → proceed to Phase 10
+- Any FAIL or average <7/10 → fix issues and re-run Phase 8-9
 
 ---
 
-## Phase 9: COMMIT AND PR
+## Phase 10: COMMIT AND PR (Seven-step standard)
 
-### Commit (conventional format)
+### Commit
 ```bash
 git add <changed-files>
 git commit -m "fix(<scope>): <concise description>
@@ -322,7 +351,7 @@ Fixes <owner/repo>#<issue-number>
 git push origin fix/<issue-slug>
 ```
 
-### Create PR (seven-step standard from PR.md)
+### Create PR
 ```bash
 gh pr create \
   --repo <owner/repo> \
@@ -336,7 +365,7 @@ Fixes #<issue-number>
 
 ## Root Cause
 
-<1-2 sentences: WHY the bug existed — this shows you understand the codebase>
+<1-2 sentences: WHY the bug existed — shows you understand the codebase>
 
 ## Changes
 
@@ -345,17 +374,17 @@ Fixes #<issue-number>
 ## Testing
 
 - [x] Full test suite passes (no regressions)
-- [x] Specific reproduction no longer triggers the bug
-- [x] Reviewed by independent code analysis
+- [x] Specific bug reproduction no longer triggers
+- [x] Independently reviewed by automated analysis
 
 ```bash
-# Verify with:
+# Verify:
 <exact test command>
 ```
 
 ## Notes
 
-Minimal fix — no unrelated changes included.
+Minimal fix — no unrelated changes.
 Happy to adjust based on review feedback.
 EOF
 )"
@@ -363,73 +392,54 @@ EOF
 
 ---
 
-## Phase 10: MONITOR AND ITERATE
+## Phase 11: MONITOR AND ITERATE
 
-PRs are conversations. Check daily and respond promptly.
-
+Check daily:
 ```bash
-gh pr view <N> --repo <owner/repo> --json state,reviews,comments,reviewRequests
+gh pr view <N> --repo <owner/repo> --json state,reviews,comments
 ```
 
-- **Code style feedback**: Fix immediately, push to same branch
-- **Alternative approach suggested**: Evaluate honestly, implement if better
-- **More tests requested**: Add them
-- **Scope concerns**: Discuss, keep minimal
-
-```bash
-git add <files>
-git commit -m "refactor: address review feedback — <what changed>"
-git push origin fix/<issue-slug>
-```
+Respond to feedback promptly. Push updates to the same branch.
 
 ---
 
-## Phase 11: REPORT
+## Phase 12: REPORT
 
-Save to `~/workspace/pr-stage/pr-report-<date>.md`:
+Update `progress.md` and save to `~/workspace/pr-stage/pr-report-<date>.md`:
 
 ```markdown
 # PR Report — <date>
 
 ## Submitted
-| Issue | PR | Repo | Fix | Score |
-|-------|-----|------|-----|-------|
-| #N | #M | owner/repo | description | 8.5/10 |
+| Issue | PR | Repo | Fix | Triple Score |
+|-------|-----|------|-----|-------------|
+| #N | #M | owner/repo | description | Claude X / Codex X / Gemini X |
 
-## Triple Review Scores
-| Dimension | Claude | Codex | Gemini | Avg |
-|-----------|--------|-------|--------|-----|
-| Direction | N | N | N | N |
-| Repo rules | N | N | N | N |
-| Scope | N | N | N | N |
-| Description | N | N | N | N |
-| Verifiable | N | N | N | N |
-| Code quality | N | N | N | N |
-| Correctness | N | N | N | N |
-| No regressions | N | N | N | N |
-| **Average** | | | | **N** |
+## Dynamic Verification
+- Bug reproduced: YES (command + output)
+- Fix verified: YES (tests pass)
+- Test baseline: X pass → X pass (no regressions)
 
-## Test Baseline
-- Before: X pass / Y fail
-- After: X+N pass / Y-M fail
-
-## Reviewer Status
-- Pending / Approved / Changes Requested
+## Review Status
+- Codex: PASS (X/10)
+- Gemini: PASS (X/10)
+- Claude: PASS (X/10)
+- Maintainer: pending
 ```
 
 ---
 
 ## Rules
 
-1. **Only fix welcomed issues** — `good first issue`, `help wanted`, or maintainer-confirmed
-2. **Evaluate repo first** — don't invest in unresponsive repos
-3. **Reproduce before fixing** — prove you understand the bug
-4. **Plan before coding** — root cause analysis, not guess-and-check
-5. **Tests must pass** — never submit with regressions
-6. **Triple review required** — Claude + Codex + Gemini all must PASS
-7. **Minimum 7/10 average** — below this, improve the fix before submitting
-8. **Seven-step PR format** — title, description, root cause, changes, testing, notes
-9. **One fix per PR** — small scope, easy to review
-10. **Follow up on reviews** — respond promptly, iterate on same branch
-11. **No static-only findings** — every fix must be verified by running code
-12. **Build trust gradually** — start with docs/small bugs, earn bigger fixes later
+1. **Dynamic verification only** — every bug must be reproduced by running code
+2. **No static-only findings** — if it can't crash when you run it, don't fix it
+3. **Codex for fixing/debugging** — write-mode code changes, sandbox testing
+4. **Gemini for research/review** — architecture analysis, 1M context codebase reading
+5. **Planning with Files** — track state in task_plan.md, findings.md, progress.md
+6. **GSD2 scientific method** — hypothesis → test → confirm before fixing
+7. **Parallel dispatch** — Codex and Gemini work simultaneously for review
+8. **Triple review required** — minimum 7/10 average to submit
+9. **8-item quality gate** — from PullRequest.md research standard
+10. **Seven-step PR format** — from PR.md workflow standard
+11. **One fix per PR** — small, reviewable, easy to merge
+12. **Follow up** — PRs are conversations, not fire-and-forget
