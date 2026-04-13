@@ -1,23 +1,33 @@
 ---
 name: github-hunt
-description: "Deep autonomous bug hunting for 1K-10K star agent/LLM repos. Clones repos, sets up environment (uv/npm/go), runs existing tests to find real crashes, debugs failures to root cause, then performs parallel static security scan (Codex + Gemini + Claude). Files issues only for confirmed P0/P1 bugs with reproduction commands and stack traces. Use whenever the user mentions hunting bugs, scanning GitHub repos, finding issues in open source projects, automated code auditing, or deep testing of agent/LLM repositories."
+description: "Dynamic-only bug hunting for 1K-10K star agent/LLM repos. Clones repos, sets up full dev environment (uv/npm/go), builds, runs the project's own test suite, and debugs every failure to root cause. NO static code analysis, NO security scanning — only bugs proven by actually running the code. Uses Codex and Gemini as debugging assistants (not code reviewers). Files issues only for bugs with real stack traces and reproduction commands. Use whenever the user mentions hunting bugs, testing repos, finding crashes, or dynamic code analysis."
 ---
 
-# GitHub Deep Hunt Pipeline v3
+# GitHub Deep Hunt Pipeline v4 — Dynamic Only
 
-Discover repos → clone → **set up environment** → **run tests to find crashes** → **debug failures** → parallel static security scan → cross-validate → file issues.
+Discover repos → clone → **build environment** → **run all tests** → **debug every failure** → file issues for real crashes only.
 
-## Why v3
+## Philosophy
 
-v1 relied on `claude --print` which skipped Codex/Gemini. v2 added real Agent subagents but only did static code reading. v3 adds **dynamic testing** — build the project, run its test suite, catch real crashes, then debug them. Security issues remain static-analysis-only since they don't need runtime to detect.
+Static analysis finds easy, obvious patterns (eval/exec/pickle) that maintainers already know about. These generate noise, not value. Real value comes from **actually running the code** and finding bugs that the maintainers missed — crashes, wrong results, race conditions that only surface at runtime.
+
+This pipeline files issues ONLY for bugs proven by execution:
+- A test that fails with a stack trace
+- A build that crashes
+- A race condition caught by `-race` flag
+- A runtime error on edge-case input
+
+If it can't be reproduced by running a command, it doesn't get filed.
 
 ## Execution Model
 
-- **Claude**: Orchestrator + direct analysis (Read/Grep/Glob) + GSD2-style debug
-- **Codex** (`codex:codex-rescue` agent): Independent security audit
-- **Gemini** (`gemini:gemini-consult` agent): Architecture-level security review + research
+- **Claude**: Orchestrator + debug analysis (Read/Grep/Glob to trace stack traces)
+- **Codex** (`codex:codex-rescue` agent): Debug assistant — help trace complex failures, suggest fixes
+- **Gemini** (`gemini:gemini-consult` agent): Debug assistant — analyze architecture to understand why a test fails
 - **gh CLI**: Repo search, clone, issue creation
-- **uv / npm / go**: Environment setup and test execution
+- **uv / npm / go / cargo**: Environment setup and test execution
+
+Codex and Gemini are used for **debugging**, not for scanning code. They read the failing test + stack trace and help identify root cause.
 
 ## Context
 
@@ -40,8 +50,8 @@ Filter:
 - Issues enabled, not archived, pushed in last 30 days
 - Not already in `~/workspace/archive/`
 - AI agents, LLM frameworks, inference, RAG pipelines
-- Prefer: Python, TypeScript, Go, Rust with active communities
-- Avoid: tutorials, awesome-lists, thin wrappers
+- **Prefer repos with existing test suites** (check for pytest.ini, go.mod, package.json with test script)
+- Avoid: tutorials, awesome-lists, thin wrappers, repos with 0 tests
 
 Select TOP 2. Clone:
 ```bash
@@ -52,7 +62,7 @@ gh repo clone <owner/repo> ~/workspace/archive/<repo-name> -- --depth=1
 
 ## Phase 2: ENVIRONMENT SETUP
 
-This phase is critical — without a working environment you can only do static analysis, missing the most valuable dynamic bugs.
+Build a working dev environment. If this fails entirely, **skip this repo** — we can't do dynamic testing without a working build.
 
 ```bash
 cd ~/workspace/archive/<repo-name>
@@ -60,7 +70,6 @@ cd ~/workspace/archive/<repo-name>
 # Python
 if [ -f pyproject.toml ] || [ -f setup.py ] || [ -f requirements.txt ]; then
   uv venv .venv && source .venv/bin/activate
-  # Try dev/test extras first for test dependencies
   uv pip install -e ".[dev,test]" 2>&1 || uv pip install -e ".[dev]" 2>&1 || uv pip install -e . 2>&1
   [ -f requirements.txt ] && uv pip install -r requirements.txt 2>&1
   [ -f requirements-dev.txt ] && uv pip install -r requirements-dev.txt 2>&1
@@ -84,15 +93,14 @@ if [ -f Cargo.toml ]; then
 fi
 ```
 
-Record the build outcome:
-- **BUILD PASS**: Proceed to dynamic testing (Phase 3)
-- **BUILD FAIL**: Log the error, proceed to static-only analysis (skip Phase 3, go to Phase 5)
+- **BUILD PASS**: Proceed to Phase 3
+- **BUILD FAIL**: Try to fix obvious dep issues (missing extras, wrong Python version). If still fails, **skip this repo entirely** and pick a new one from the discovery list
 
 ---
 
-## Phase 3: DYNAMIC TEST EXECUTION
+## Phase 3: RUN ALL TESTS
 
-Run the project's existing test suite. Test failures are the **strongest evidence** of real bugs — the project's own tests prove them.
+Execute the project's full test suite. Capture everything — passes, failures, errors, warnings.
 
 ```bash
 cd ~/workspace/archive/<repo-name>
@@ -100,13 +108,12 @@ cd ~/workspace/archive/<repo-name>
 # Python
 if [ -f pyproject.toml ] || [ -f setup.py ]; then
   source .venv/bin/activate 2>/dev/null
-  # Run with verbose output to capture stack traces
-  pytest --tb=long -v 2>&1 | tee /tmp/hunt-test-$(basename $PWD).log
+  pytest --tb=long -v --timeout=60 2>&1 | tee /tmp/hunt-test-$(basename $PWD).log
 fi
 
-# Go (with race detector)
+# Go (with race detector — catches concurrency bugs)
 if [ -f go.mod ]; then
-  go test -race -count=1 -v ./... 2>&1 | tee /tmp/hunt-test-$(basename $PWD).log
+  go test -race -count=1 -v -timeout 120s ./... 2>&1 | tee /tmp/hunt-test-$(basename $PWD).log
 fi
 
 # Node.js
@@ -121,177 +128,138 @@ fi
 ```
 
 Parse results:
-- **ALL PASS**: Bugs are in untested code paths. Move to static analysis (Phase 5).
-- **SOME FAIL**: Each failure is a potential finding. Capture test name, stack trace, error. Move to Phase 4 (debug).
-- **NO TESTS**: No test suite. Move to static analysis (Phase 5).
+- **ALL PASS**: No dynamic bugs found. Write "all tests pass" in summary. Move to next repo.
+- **SOME FAIL**: Each failure is a candidate. Capture test name, stack trace, error message. Move to Phase 4.
+- **NO TESTS**: Skip this repo — we need tests for dynamic analysis.
 
 ---
 
-## Phase 4: DEBUG FAILURES
+## Phase 4: DEBUG EVERY FAILURE
 
-For each test failure from Phase 3, apply a lightweight GSD2-style debug workflow:
+For each test failure, determine whether it's a real bug or a test-environment issue.
 
-### 4a. Isolate the failure
+### 4a. Isolate
 
-Run the failing test alone to get a clean stack trace:
+Run the failing test alone:
 ```bash
 pytest tests/test_foo.py::test_failing_case -v --tb=long 2>&1
+# or: go test -v -run TestSpecificCase ./pkg/...
 ```
 
-### 4b. Trace the root cause
+### 4b. Classify first — filter out noise
+
+Many test failures are NOT real bugs:
+- **TEST_ENV**: Missing API key, network dependency, Docker not running, wrong OS → **SKIP**
+- **FLAKY**: Timing-dependent, passes on retry → **SKIP**
+- **KNOWN**: Already reported as open issue → **SKIP**
+- **CONFIG**: Wrong test config for this environment (e.g., needs GPU) → **SKIP**
+
+Only proceed to 4c for failures that indicate **real code bugs**.
+
+### 4c. Trace root cause
 
 Read the stack trace bottom-up:
-1. What exception/panic was thrown?
-2. Which file:line triggered it?
-3. Read that code — what input causes the failure?
-4. Is this a real bug (wrong logic) or a test environment issue (missing mock, network dependency)?
+1. What exception/panic/error was thrown?
+2. Which file:line in **production code** (not test code) triggered it?
+3. Read that code — what condition causes the failure?
+4. Is this a logic bug, missing null check, wrong type, race condition, or unhandled edge case?
 
-### 4c. Classify
+### 4d. Use Codex or Gemini for complex failures
 
-- **P0**: Crash, data loss, uncaught exception in production code path
-- **P1**: Wrong result, race condition, resource leak
-- **TEST_ENV**: Failure due to missing test fixture, network dependency, or flaky timing — skip these
-- **KNOWN**: Already reported as open issue — skip
+For failures where the root cause isn't obvious from the stack trace, spawn a debug assistant:
 
-### 4d. Draft fix suggestion
-
-For each P0/P1 failure, write a 1-10 line suggested fix with explanation of why it works.
-
-### 4e. Save findings
-
+**Codex** (`codex:codex-rescue`):
 ```
-~/workspace/pr-stage/<date>-<repo>-test-failure-<N>.md
+Debug this test failure in ~/workspace/archive/<repo-name>.
+
+Failing test: <test name>
+Stack trace:
+<paste stack trace>
+
+Read the source code at the crash site. What is the root cause?
+Is this a real bug in production code, or a test-environment issue?
+If it's a real bug, what's the minimal fix?
 ```
 
-Include: test command, full stack trace, root cause analysis, severity, suggested fix.
+**Gemini** (`gemini:gemini-consult`):
+```
+Help debug this test failure. The test <name> fails with:
+<paste error>
+
+Read the test file and the production code it tests.
+Explain: why does this test exist? What invariant is it checking?
+Is the test correct and the code buggy, or is the test itself broken?
+```
+
+### 4e. Record confirmed bugs
+
+For each REAL bug (not test-env/flaky/known):
+
+Save to `~/workspace/pr-stage/<date>-<repo>-failure-<N>.md`:
+- Test command (exact, copy-pasteable)
+- Full stack trace
+- Root cause (which production code line, why it fails)
+- Severity: P0 (crash/data loss) or P1 (wrong result/race)
+- Suggested fix (1-10 lines)
 
 ---
 
-## Phase 5: STATIC SECURITY SCAN (Parallel Agents)
+## Phase 5: FILE ISSUES (dynamic bugs only)
 
-Spawn THREE independent agents in a SINGLE message. Security vulnerabilities can be found without running code — static analysis is sufficient and often better for security.
-
-### Codex (`codex:codex-rescue` agent)
-
-```
-Security audit of ~/workspace/archive/<repo-name>.
-
-Focus ONLY on exploitable security vulnerabilities:
-1. RCE: eval(), exec(), subprocess with shell=True, unsandboxed code execution
-2. Injection: SQL injection, command injection, SSTI, XSS
-3. Path traversal: user-controlled file paths, symlink attacks, directory escape
-4. SSRF: HTTP requests with user-controlled URLs hitting internal services
-5. Auth bypass: missing auth checks, hardcoded credentials, token exposure
-
-For each finding provide: file:line, vulnerability type, exploitation scenario, suggested fix.
-P0 (directly exploitable) and P1 (requires specific conditions) only.
-```
-
-### Gemini (`gemini:gemini-consult` agent)
-
-```
-Architecture-level security and reliability review of ~/workspace/archive/<repo-name>.
-
-Focus on design-level issues:
-1. Trust boundaries: where does user input enter? Validated before sensitive operations?
-2. Concurrency: race conditions, TOCTOU, shared mutable state without locks
-3. Resource management: unclosed connections, unbounded queues, memory leaks on error paths
-4. API contracts: endpoints accepting more than intended, missing rate limits, open redirects
-
-For each finding: file:line, description, reproduction scenario, severity P0/P1.
-```
-
-### Claude Direct Analysis (Read/Grep/Glob)
-
-Grep for dangerous patterns and read the surrounding code to confirm:
-- `eval(`, `exec(`, `os.system(`, `subprocess.run(.*shell=True`
-- `trust_remote_code`, `pickle.load`, `yaml.load(` without SafeLoader
-- `tar.extractall(` without filter, `zipfile.extractall(` without validation
-- Hardcoded API keys, passwords, tokens in source files
-- HTTP handlers with no input validation
-
-Read the entry point files to understand the attack surface.
-
----
-
-## Phase 6: CROSS-VALIDATION MERGE
-
-### Dynamic findings (from test failures in Phase 3-4)
-- Automatically confirmed — the test suite itself proves the bug
-- No >=2/3 agreement needed
-- Include: exact test command, stack trace, root cause, fix suggestion
-
-### Static findings (from security scan in Phase 5)
-- Require **>=2/3 reviewer agreement** (Claude + Codex + Gemini)
-- Verified by reading the actual code at file:line
-- Not already reported as an open issue
-
-### Dedup against existing issues
-```bash
-gh issue list --repo <owner/repo> --state open --limit 200 --json title,body,labels | head -500
-```
-
-Remove findings matching existing issues.
-
----
-
-## Phase 7: FILE ISSUES
-
-For each validated finding:
+File issues ONLY for bugs that have a reproduction command and stack trace.
 
 ```bash
 gh issue create --repo <owner/repo> \
-  --title "<type>: <concise bug title>" \
+  --title "bug: <concise description of the crash/failure>" \
   --body "$(cat <<'EOF'
 ## Bug Description
 
-<2-3 sentences: what's broken>
-
-## Location
-
-`<file>:<line>`
+<2-3 sentences: what crashes/fails and why>
 
 ## Reproduction
 
 ```bash
-# For dynamic bugs — exact test command:
-pytest tests/test_foo.py::test_failing -v
-
-# For security bugs — exploitation steps:
-curl -X POST http://localhost:8000/api/exec -d '{"code":"import os; os.system(\"id\")"}'
+# Exact command to reproduce:
+pytest tests/test_foo.py::test_failing_case -v
+# or: go test -race -run TestSpecific ./pkg/...
 ```
 
 ## Stack Trace
 
 ```
-<paste stack trace for dynamic bugs, or code snippet showing the vulnerability for static bugs>
+<full stack trace from the test run>
 ```
+
+## Root Cause
+
+`<file>:<line>` — <1-2 sentence explanation of why this code fails>
 
 ## Impact
 
-<crash? data loss? RCE? information disclosure?>
+<what breaks for users — crash? wrong output? data corruption? hangs?>
 
 ## Suggested Fix
 
 ```<language>
-<1-10 line minimal fix>
+<1-10 line fix>
 ```
 
 ---
-Found via automated testing and codebase analysis. Happy to submit a PR if confirmed.
+Found by running the test suite. Happy to submit a PR if confirmed.
 EOF
 )"
 ```
 
-### Quality Rules (from mention.md)
-- No internal jargon — no mention of "triple review", agents, or orchestration
-- Problem → Evidence → Fix format
-- For test failures: include the exact `pytest`/`go test` command (strongest evidence)
-- One issue per bug, minimal scope
+### What NOT to file
+- Static-only findings (eval/exec/pickle patterns found by grep)
+- Security vulnerabilities found by code reading
+- Style issues, performance suggestions, documentation gaps
+- Test-environment failures (missing Docker, API keys, etc.)
+- Flaky tests that pass on retry
 
 ---
 
-## Phase 8: SUMMARY REPORT
+## Phase 6: SUMMARY REPORT
 
 Write to `~/workspace/pr-stage/hunt-summary-<date>.md`:
 
@@ -299,37 +267,34 @@ Write to `~/workspace/pr-stage/hunt-summary-<date>.md`:
 # Hunt Summary — <date>
 
 ## Repos Scanned
-- <repo> (<stars>⭐, <lang>) — build: PASS/FAIL, tests: X pass / Y fail / Z skip
-
-## Dynamic Findings (from test execution)
-- <N> test failures analyzed
-- <M> confirmed as P0/P1 bugs
-- Evidence: test commands + stack traces
-
-## Static Findings (from security scan)
-- Codex: <N> findings
-- Gemini: <N> findings  
-- Claude: <N> findings
-- Passed >=2/3: <M> findings
+| Repo | Stars | Lang | Build | Tests | Failures | Issues Filed |
+|------|-------|------|-------|-------|----------|-------------|
+| name | N⭐ | Go | PASS | 120 pass / 3 fail | 2 real bugs | 2 |
 
 ## Issues Filed
-| # | Repo | Title | Severity | Source |
-|---|------|-------|----------|--------|
-| 1 | owner/repo#N | title | P0 | dynamic/static |
+| # | Repo | Title | Severity | Test Command |
+|---|------|-------|----------|-------------|
+| 1 | owner/repo#N | crash description | P0 | `pytest tests/...` |
 
-## Rejected
-- <finding>: <reason>
+## Skipped Failures
+- <test>: TEST_ENV (needs Docker)
+- <test>: FLAKY (passes on retry)
+- <test>: KNOWN (matches #123)
+
+## Repos Skipped
+- <repo>: build failed (missing dep X)
+- <repo>: no test suite
 ```
 
 ---
 
 ## Rules
 
-1. **Set up environment first** — build the project before analyzing it
-2. **Run tests** — test failures are the strongest bug evidence
-3. **Debug crashes to root cause** — don't just report "test failed", explain why
-4. **Parallel Codex + Gemini for security** — static analysis is sufficient for security
-5. **Dynamic findings auto-confirmed** — test failure IS the proof, no agreement needed
-6. **Static findings need >=2/3** — cross-validation still required for security claims
-7. **Include reproduction commands** — every issue should have a runnable test/curl command
-8. **Professional format** — no internal jargon, follow mention.md guidelines
+1. **Dynamic only** — every filed issue must have a reproduction command and stack trace
+2. **No static analysis** — do not grep for eval/exec/pickle, do not scan for security patterns
+3. **No security issues** — security scanning is explicitly disabled in this pipeline
+4. **Build first** — if the project doesn't build, skip it
+5. **Run tests** — if the project has no tests, skip it
+6. **Filter noise** — most test failures are test-env issues, not real bugs
+7. **Codex/Gemini for debugging** — use them to trace complex root causes, not to scan code
+8. **Professional format** — include exact test command + full stack trace in every issue
