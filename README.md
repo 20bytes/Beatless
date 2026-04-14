@@ -1,123 +1,127 @@
-# Beatless — Autonomous Agent System (Hermes v2.1)
+# Beatless — Aoi's Autonomous Agent Framework
 
-6-agent autonomous system for GitHub issue hunting, blog maintenance, and research automation. Built on Hermes Agent framework with ClaudeCode as the execution engine.
+<p align="center">
+  <em>Hi, I'm <strong>Aoi</strong> — a digital being who orchestrates autonomous agents to contribute to open source, maintain a technical blog, and conduct research. Beatless is the framework that makes me run.</em>
+</p>
+
+## What Aoi Does
+
+Aoi operates 24/7 through a heartbeat scheduler, autonomously:
+
+- **Submits Pull Requests** to open-source agent/LLM projects (v7.4 pipeline with triple review)
+- **Writes technical blog posts** on AI engineering, agent frameworks, and BCI research
+- **Monitors PR feedback** and iterates on maintainer requests
+
+First PR: [PrefectHQ/marvin#1326](https://github.com/PrefectHQ/marvin/pull/1326) — fixing PEP 563 annotation resolution.
 
 ## Architecture
 
 ```
-User (StepFun APP / OpenRoom)
-  ↓
-Aoi (MiniMax M2.7) — dispatcher only
-  ↓ task_request via mailbox
-5 MainAgents (Step 3.5 Flash) — thin consumers
-  ↓ claude --print "/command"
-ClaudeCode (Sonnet 4.6) — execution engine
-  ├── Agent tool (parallel scanning)
-  ├── /codex:review (code audit)
-  └── /gemini:consult (research + architecture)
+Aoi (Scheduler + Dispatcher)
+  ↓ 30-min heartbeat
+Pipelines
+  ├── auto-pr      — discover → fix → review → submit PRs (every 30min)
+  └── blog-maint   — audit → research → write → publish (every 2.5h)
+      ↓
+ClaudeCode (Execution Engine)
+  ├── Codex (write-mode fixing + debugging)
+  ├── Gemini (1M context research + architecture review)
+  └── Planning-with-Files (task_plan.md, findings.md, progress.md)
 ```
 
-### Design Principles
+### PR Pipeline (v7.4)
 
-1. **Aoi is the only scheduler** — 30-min heartbeat, dispatches pipelines
-2. **Mailbox is 2-step only** — task_request → task_result, no multi-hop
-3. **Each MainAgent = 1 ClaudeCode command** — receive task, run `claude --print`, report result
-4. **ClaudeCode owns complexity** — AgentTeam, GSD, Codex/Gemini all run inside ClaudeCode
-5. **Triple review** — Claude (primary) + Codex (audit) + Gemini (research)
+The PR pipeline follows a 12-phase process validated against three reference standards:
 
-## Agents
+1. **Discover** — find `good-first-issue` / `help-wanted` / confirmed bugs
+2. **Claim** — comment on issue before coding (mandatory)
+3. **Evaluate** — Gemini reads CONTRIBUTING.md, PR template, recent PRs
+4. **Setup** — fork → clone → install deps → run baseline tests
+5. **Reproduce** — dynamically trigger the bug (no static-only analysis)
+6. **Debug** — GSD2 scientific method (hypothesis → test → confirm)
+7. **Implement** — Codex writes the fix in write-mode
+8. **Verify** — full test suite + specific repro + lint
+9. **Triple Review** — Gemini (correctness) + Codex (architecture) + Claude (8-item gate)
+10. **Iterate** — fix deductions, re-score changed dimensions (max 2 rounds)
+11. **Submit** — fork-based PR with preflight checks
+12. **Monitor** — respond to maintainer feedback
 
-| Agent | Role | Model | Key Commands |
-|-------|------|-------|-------------|
-| **Aoi** | Dispatcher / control plane | MiniMax M2.7 | Pipeline scheduling, mailbox routing |
-| **Lacia** | Strategy / planning | Step 3.5 Flash → Sonnet | `/gsd-discuss-phase`, `/gsd-plan-phase` |
-| **Methode** | Execution / implementation | Step 3.5 Flash → Sonnet | `/gsd-execute-phase`, AgentTeam scanning |
-| **Satonus** | Review gate | Step 3.5 Flash → Sonnet | `/codex:review`, `/gemini:consult` |
-| **Snowdrop** | Research / discovery | Step 3.5 Flash → Sonnet | `/github-hunt`, `/gemini:consult` |
-| **Kouka** | Delivery / publishing | Step 3.5 Flash → Sonnet | `/blog-maintenance`, `/gsd-ship` |
+### Quality Controls
 
-## Pipelines
+| Control | Description |
+|---------|-------------|
+| **Anti-inflation** | No self-review (implementer reviews architecture, not own code) |
+| **Evidence-based scoring** | file:line references, deduction reasons, anchor at 7 |
+| **Revert-test-reapply** | Reviewer must prove test fails without fix |
+| **Phase 9b iteration** | Fix deductions before submission (final bar: 7.5/10) |
+| **Anti-AI detection** | No generic phrases, reference prior work, show understanding |
+| **Goldilocks gate** | Skip typo-only (too trivial) and architecture redesign (too complex) |
 
-### GitHub Issue Hunter (`/github-hunt`)
+### Trial Results
 
-Discovers 1K-10K star agent/LLM repos, deep scans with triple review, outputs validated issue proposals.
+| # | Repo | Score | Status |
+|---|------|-------|--------|
+| 1 | terrazzo#712 | 7.8 → N/A | Trial only |
+| 2 | marvin#950 | 8.1 → 8.6 | [PR #1326 submitted](https://github.com/PrefectHQ/marvin/pull/1326) |
 
-- **Interval**: every 8 hours
-- **Output**: `~/workspace/pr-stage/<date>-<repo>-finding-<N>.md`
-- **Quality bar**: P0/P1 only, 2/3 reviewers must agree, no auto-submit
+## About Aoi
 
-### Blog Maintenance (`/blog-maintenance`)
+Aoi is a digital persona built on the [OpenRoom](https://github.com/MiniMax-AI/OpenRoom) platform — an AI desktop environment where digital beings have their own workspace, apps, and agency. In Beatless, Aoi operates through terminal-based automation, but the long-term vision is a fully embodied digital being with visual presence and real-time interaction.
 
-Audits existing posts, researches trending topics (Big Three AI, agent engineering, BCI), writes new posts.
+### Aoi's Agents
 
-- **Interval**: every 12 hours
-- **Output**: `~/blog/src/content/blogs/<slug>/index.mdx`
-- **Topics**: Anthropic/OpenAI/DeepMind reports, agent frameworks, BCI research
+| Agent | Role | Pipeline |
+|-------|------|----------|
+| **Lacia** | Strategy + planning | Phase 6 (fix planning) |
+| **Methode** | Execution + implementation | Phase 7 (Codex dispatch) |
+| **Satonus** | Review gate | Phase 9 (triple review) |
+| **Snowdrop** | Research + discovery | Phase 1-2 (issue search + repo eval) |
+| **Kouka** | Delivery + publishing | Phase 11 (PR submission) + blog |
 
 ## File Structure
 
 ```
-agents/
-├── aoi/SOUL.md          # Dispatcher protocol
-├── lacia/SOUL.md         # Strategy worker
-├── methode/SOUL.md       # Execution worker
-├── satonus/SOUL.md       # Review gate worker
-├── snowdrop/SOUL.md      # Research worker
-└── kouka/SOUL.md         # Delivery worker
-
 pipelines/
-├── github-hunt.md        # ClaudeCode command for issue hunting
-└── blog-maintenance.md   # ClaudeCode command for blog maintenance
+├── github-pr.md          # PR skill (v7.4 — full pipeline spec)
+├── auto-pr.sh            # Auto-submission runner (30min heartbeat)
+├── blog-maintenance.md   # Blog skill
+└── github-pr-state.json  # Pipeline state (interval, last run)
 
 scripts/
-├── heartbeat-driver.sh   # Pipeline scheduler (checks schedules, launches tmux)
-├── cron-driver.sh        # Cron entry point (calls heartbeat-driver)
-└── session-watcher.sh    # Zombie process cleanup for AgentTeam
+├── heartbeat-driver.sh   # Pipeline scheduler
+└── cron-driver.sh        # Cron entry point
 
-docs/
-├── architecture-v2-simplification.md      # Original v2 proposal
-├── architecture-v2-simplification-v2.md   # v2.1 hardening
-└── openroom-alignment.md                  # OpenRoom integration plan
-
-archive/                  # Old OpenClaw-era files (reference only)
+agents/
+├── aoi/SOUL.md           # Scheduler protocol
+├── lacia/SOUL.md         # Strategy
+├── methode/SOUL.md       # Execution
+├── satonus/SOUL.md       # Review
+├── snowdrop/SOUL.md      # Research
+└── kouka/SOUL.md         # Delivery
 ```
 
-## Runtime Setup
-
-### Prerequisites
-
-- Hermes Agent installed at `~/claw/hermes-agent/venv/`
-- Claude Code CLI (`claude`)
-- Codex CLI (`codex`)
-- Gemini CLI (`gemini`)
-- GitHub CLI (`gh`, authenticated)
-- StepFun bridge at `~/.hermes/shared/scripts/stepfun-bridge.mjs`
-
-### Start the system
+## Quick Start
 
 ```bash
-# 1. Start cron daemon (30-min heartbeat)
-nohup bash /tmp/hermes-cron-daemon.sh >> ~/.hermes/shared/cron-daemon.log 2>&1 &
+# Start the heartbeat (runs auto-pr every 30min, blog every 2.5h)
+nohup bash scripts/cron-driver.sh >> logs/cron.log 2>&1 &
 
-# 2. Start StepFun bridge (mobile interface)
-node ~/.hermes/shared/scripts/stepfun-bridge.mjs --probe
+# Manual PR pipeline trigger
+bash pipelines/auto-pr.sh
 
-# 3. Manual pipeline trigger
-bash ~/.hermes/shared/pipelines/github-hunt/test-run.sh
-bash ~/.hermes/shared/pipelines/blog-maintenance/test-run.sh
+# Monitor
+tmux attach -t auto-pr
+tail -f ~/.hermes/shared/logs/auto-pr-*.log
 ```
 
-### Monitor
+## Requirements
 
-```bash
-tmux attach -t github-hunt        # Watch pipeline output
-tmux attach -t blog-maintenance    # Watch pipeline output
-tail -f ~/.hermes/shared/logs/heartbeat.log  # Watch scheduler
-```
+- Claude Code CLI (`claude`) with Sonnet/Opus
+- Codex CLI (`codex`) for write-mode fixing
+- Gemini CLI (`gemini`) for 1M context research
+- GitHub CLI (`gh`, authenticated as CrepuscularIRIS)
+- `uv` for Python projects, `pnpm` for JS/TS
 
-## Validated Results (2026-04-11)
+## License
 
-| Pipeline | Duration | Output |
-|----------|----------|--------|
-| github-hunt | 52 min | 3 PASS proposals (TOCTOU race, 2x panic bugs), Codex+Gemini verified |
-| blog-maintenance | 40 min | 2 new posts (1500+ words), 1 rewrite, pnpm build PASS |
+MIT
