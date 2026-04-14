@@ -60,13 +60,14 @@ gh search issues --label="bug" --state=open --sort=comments --limit=20 \
   -- "crash OR panic OR fix OR broken" -author:CrepuscularIRIS
 ```
 
-Selection criteria — ALL must be true:
-- Maintainer acknowledged (comment from repo member)
-- Age >7 days (not a fresh, possibly invalid report)
-- Clear scope (repro steps, error message, or specific file)
-- Fixable in <100 lines
-- Not assigned to someone else
-- Repo has test suite and CI
+Selection criteria — ALL must be true (hard gates, no exceptions):
+- **Human maintainer acknowledged** — comment from a repo member/collaborator, NOT a bot (Dosu, copilot, etc.). Check `authorAssociation` field: must be MEMBER, COLLABORATOR, or OWNER
+- **Age >7 days** — `createdAt` must be at least 7 days old. Fresh issues may be invalid or duplicates
+- **No competing assignees** — read ALL comments; if anyone has asked "assign me" or "I'll work on this", SKIP. Check `assignees` field too
+- **No competing PRs** — run `gh pr list --repo <owner/repo> --search "<issue-number>"` to check for existing fix PRs
+- **Clear scope** — repro steps, error message, or specific file identified
+- **Fixable in <100 lines**
+- **Repo has test suite and CI**
 
 ---
 
@@ -283,54 +284,82 @@ If any test regresses → debug and fix before proceeding. Never submit with reg
 
 Spawn all three reviewers in a SINGLE message using the **SuperPowers parallel dispatch** pattern. Each reviews independently.
 
-### Codex review (`codex:codex-rescue`) — focus: correctness + code quality
+**Critical rule: NO SELF-REVIEW.** The agent that implemented the fix (Phase 7) must NOT score its own code. Role assignment:
+- If **Codex** implemented → Codex reviews architecture/social fit, Gemini reviews correctness/code quality
+- If **Claude** implemented → swap accordingly
+- The implementer ALWAYS takes the role furthest from their own work
+
+### Scoring discipline
+
+Every score MUST include:
+1. **Specific file:line references** — "base.py:250 correctly guards with None check"
+2. **Deduction reasons** — if score < 10, state exactly what's missing or wrong
+3. **Comparison to alternatives** — "Dosu bot suggested filtering all None values; this fix only guards best_of, which is narrower but sufficient because..."
+4. **Anchor at 7** — a score of 7 means "acceptable, meets minimum bar". 8 = good. 9 = excellent with minor nits. 10 = flawless, rare. Scores of 9-10 require exceptional justification.
+
+### Reviewer A (`codex:codex-rescue` or `gemini:gemini-consult` — whichever did NOT implement)
+Focus: **correctness + code quality**
 
 ```
 Review this git diff in ~/workspace/contrib/<repo-name>.
+You are an independent reviewer — you did NOT write this code.
 
-Score each dimension 1-10:
-1. Correctness — does it fix the root cause, not just the symptom?
-2. Minimality — only necessary lines changed?
-3. Code quality — matches repo style, clean diff, no artifacts?
-4. Test coverage — regression test exists, tests pass?
-5. No regressions — existing functionality preserved?
+Score each dimension 1-10 (anchor at 7 = acceptable):
+1. Correctness — does it fix the root cause? Could it introduce new bugs? Cite specific lines.
+2. Minimality — are ALL changed lines necessary? Flag any line that could be removed.
+3. Code quality — does it match repo style exactly? Check naming, indentation, patterns.
+4. Test coverage — do tests actually exercise the fix? Could the tests pass even WITHOUT the fix (false green)?
+5. No regressions — check edge cases the fix might break. List 2-3 scenarios you verified.
 
-Output: | Dimension | Score | Justification |
-PASS if average >=7, FAIL otherwise. Be strict.
+For EACH dimension, output:
+| Dimension | Score | Evidence (file:line + specific observation) | Deduction reason (if <10) |
+
+PASS if average >=7. FAIL otherwise.
+If any single dimension scores <=5, the overall result is FAIL regardless of average.
 ```
 
-### Gemini review (`gemini:gemini-consult`) — focus: architecture + social fit
+### Reviewer B (the other agent — whichever did NOT implement)
+Focus: **architecture + social fit**
 
 ```
 Review this PR for ~/workspace/contrib/<repo-name>.
+Read the FULL module (not just the diff), the PR description draft, and CONTRIBUTING.md.
 
-Read the diff AND the PR description draft. Score each dimension 1-10:
-1. Architecture fit — respects module design patterns and invariants?
-2. Edge cases — are boundary conditions handled?
-3. PR description — root cause explained, verification included, scope clear?
-4. Social fit — humble tone, no jargon, follows CONTRIBUTING.md?
-5. Maintainer perspective — would you merge this? Easy to review?
+Score each dimension 1-10 (anchor at 7 = acceptable):
+1. Architecture fit — does the fix respect existing design patterns? Could it be done differently? Compare to how similar changes were made in the repo's git history.
+2. Edge cases — list 3 edge cases. For each, state whether the fix handles it and cite evidence.
+3. PR description — is root cause explained accurately? Would a maintainer understand the fix in <2 minutes?
+4. Social fit — tone appropriate? Follows CONTRIBUTING.md? No overconfident claims?
+5. Maintainer perspective — compare to the repo's last 5 merged PRs. Is this PR at the same quality level?
 
-Output: | Dimension | Score | Justification |
-PASS if average >=7, FAIL otherwise. Be strict.
+For EACH dimension, output:
+| Dimension | Score | Evidence (specific observation) | Deduction reason (if <10) |
+
+PASS if average >=7. FAIL otherwise.
+If any single dimension scores <=5, the overall result is FAIL regardless of average.
 ```
 
-### Claude self-review — focus: 8-item quality gate
+### Claude self-review — focus: 8-item quality gate (from PullRequest.md)
 
-Score against the PullRequest.md standard:
-1. Direction correct (issue is welcomed)
-2. Follows repo rules (CONTRIBUTING.md, PR template)
-3. Small scope (one fix per PR)
-4. Complete description (background, purpose, verification)
-5. Verifiable (tests, repro command)
-6. Low friction communication (clear, humble)
-7. Follow-up ready (will handle review comments)
-8. Trust building (appropriate scope for contributor level)
+Score against PullRequest.md standard. For each item, provide a YES/NO with specific evidence:
+
+1. **Direction correct** — Is issue >7 days old? Acknowledged by HUMAN maintainer (not bot)? No competing assignees or PRs? (If any NO → score <=6)
+2. **Follows repo rules** — Quote specific CONTRIBUTING.md requirements met. List any requirements NOT checked.
+3. **Small scope** — Count lines changed. If >50 lines, justify why each file is necessary.
+4. **Complete description** — Does PR body explain root cause with technical detail? Not just "fixed the bug".
+5. **Verifiable** — Paste the exact test command and its output. If test was written by us, could it pass WITHOUT our fix? (false green check)
+6. **Low friction** — Would a non-native English speaker understand the PR? Is tone humble, not lecturing?
+7. **Follow-up ready** — What would you do if maintainer asks for a different approach?
+8. **Trust building** — Is this an appropriate first contribution to this repo? Or are we overreaching?
+
+Output: 8 rows with Score (1-10) + Evidence. Average must be >=7.
+**Hard fail triggers**: item 1 or 2 scores <=5 → overall FAIL (these are non-negotiable).
 
 ### Gate decision
 
-- All three PASS + average >=7/10 → proceed to Phase 10
-- Any FAIL or average <7/10 → fix issues and re-run Phase 8-9
+- All three reviewers PASS + overall average >=7.0 → proceed to Phase 10
+- Any single reviewer FAIL → fix issues, re-run Phase 8-9
+- Any hard fail trigger → STOP, pick a different issue
 
 ---
 
