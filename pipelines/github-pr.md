@@ -428,6 +428,18 @@ Round 1: Codex Social fit = 6 (missing changeset)
 - [ ] All repo-specific requirements met (changeset, CLA, etc.)
 - [ ] PR body contains NO generic AI phrases ("Happy to adjust", "Let me know if you have any questions", "I hope this helps")
 
+### Commit hygiene (clean history before pushing)
+
+If multiple commits exist on the branch, squash into a single clean commit:
+```bash
+# Check commit count on branch
+git log --oneline main..HEAD
+# If >1 commit, squash:
+git rebase -i main  # squash all fixup/debug commits into one
+```
+
+The final commit should be self-contained and bisect-friendly — the project must compile at this commit.
+
 ### Commit
 ```bash
 git add <changed-files>
@@ -476,8 +488,7 @@ Fixes #<issue-number>
 
 ## Notes
 
-Minimal fix — no unrelated changes.
-Happy to adjust based on review feedback.
+Minimal fix — only changes the annotation resolution path. No unrelated changes.
 EOF
 )"
 ```
