@@ -91,14 +91,42 @@ Skip repos that fail 3+ of: CONTRIBUTING.md, PR template, recent commits, mainta
 
 ---
 
+## Phase 2.5: CLAIM THE ISSUE (mandatory before any code)
+
+**Before cloning or writing any code**, comment on the issue to declare intent:
+
+```
+Hi — I'd like to work on this.
+
+[1-2 sentences: your understanding of the root cause]
+[1 sentence: your proposed approach]
+
+Would this be welcome as a PR?
+```
+
+**Rules:**
+- NEVER submit a PR without first commenting on the issue
+- Keep tone humble and specific — show you read the issue, not just the title
+- Reference prior PRs/discussions if they exist ("I noticed #1258 proposed X...")
+- Do NOT use generic AI phrases like "Happy to adjust based on review feedback"
+- Wait at least a few hours for response before submitting (unless issue is old and clearly uncontested)
+
+### Git identity (mandatory)
+
+```bash
+git config --global user.email "serenitygp@qq.com"
+git config --global user.name "CrepuscularIRIS"
+```
+
 ## Phase 3: SETUP ENVIRONMENT + RUN TESTS
 
 ```bash
 cd ~/workspace/contrib/<repo-name>
 
-# Fork + upstream
+# Fork + upstream (MUST use fork, never push to upstream directly)
 gh repo fork <owner/repo> --clone=false 2>/dev/null || true
-git remote add upstream https://github.com/<owner/repo>.git 2>/dev/null || true
+git remote rename origin upstream 2>/dev/null || true
+git remote add origin https://github.com/CrepuscularIRIS/<repo-name>.git 2>/dev/null || true
 git fetch upstream && git checkout main && git pull upstream main
 
 # Install deps
@@ -392,6 +420,14 @@ Round 1: Codex Social fit = 6 (missing changeset)
 
 ## Phase 10: COMMIT AND PR (Seven-step standard)
 
+### Pre-flight checks (all must pass)
+- [ ] Issue comment posted (Phase 2.5) — verify with `gh issue view <N> --repo <owner/repo> --json comments`
+- [ ] Fork exists — verify with `gh repo view CrepuscularIRIS/<repo-name>`
+- [ ] Remote `origin` points to fork, `upstream` points to original
+- [ ] Git author is `CrepuscularIRIS <serenitygp@qq.com>` — verify with `git log -1 --format="%an <%ae>"`
+- [ ] All repo-specific requirements met (changeset, CLA, etc.)
+- [ ] PR body contains NO generic AI phrases ("Happy to adjust", "Let me know if you have any questions", "I hope this helps")
+
 ### Commit
 ```bash
 git add <changed-files>
@@ -402,7 +438,7 @@ Fixes <owner/repo>#<issue-number>
 <one-line: root cause and how this fixes it>"
 ```
 
-### Push
+### Push (to FORK, never upstream)
 ```bash
 git push origin fix/<issue-slug>
 ```
