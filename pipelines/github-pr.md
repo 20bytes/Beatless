@@ -67,6 +67,7 @@ Selection criteria — ALL must be true (hard gates, no exceptions):
 - **No competing PRs** — run `gh pr list --repo <owner/repo> --search "<issue-number>"` to check for existing fix PRs
 - **Clear scope** — repro steps, error message, or specific file identified
 - **Fixable in <100 lines**
+- **Goldilocks difficulty** — SKIP if too trivial (typo-only, single-word doc fix — low impact, no reputation gain) OR too complex (architecture redesign, cross-module refactor, needs design discussion — high rejection risk). Target: bugs with clear repro, 10-100 line fixes, involves real logic change
 - **Repo has test suite and CI**
 
 ---
@@ -427,6 +428,7 @@ Round 1: Codex Social fit = 6 (missing changeset)
 - [ ] Git author is `CrepuscularIRIS <serenitygp@qq.com>` — verify with `git log -1 --format="%an <%ae>"`
 - [ ] All repo-specific requirements met (changeset, CLA, etc.)
 - [ ] PR body contains NO generic AI phrases ("Happy to adjust", "Let me know if you have any questions", "I hope this helps")
+- [ ] Push target is fork — `git remote get-url origin` must contain `CrepuscularIRIS/`, NOT the upstream org
 
 ### Commit hygiene (clean history before pushing)
 
