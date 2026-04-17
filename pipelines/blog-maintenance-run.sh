@@ -30,9 +30,15 @@ tmux new-session -d -s "$SESSION_NAME" bash -c "
   export HOME=/home/yarizakurahime
   export PATH=/home/yarizakurahime/.bun/bin:/home/yarizakurahime/.local/bin:/home/yarizakurahime/.cargo/bin:/usr/local/bin:/usr/bin:/bin
   export GH_CONFIG_DIR=/home/yarizakurahime/.config/gh
+  export GITHUB_TOKEN=\$(gh auth token 2>/dev/null || echo '')
+  export GITHUB_USER=CrepuscularIRIS
   cd \$HOME/blog
 
   echo '=== blog-maintenance pipeline started at $(date -u) ===' | tee '$LOG_FILE'
+
+  # Pre-step: refresh GitHub activity feed (fast, ~30s)
+  echo '[feed-digest] refreshing github activity data...' | tee -a '$LOG_FILE'
+  timeout 120 node \$HOME/blog/src/scripts/fetch-github-activity.mjs 2>&1 | tee -a '$LOG_FILE' || echo '[feed-digest] WARN: fetch failed, keeping previous data' | tee -a '$LOG_FILE'
 
   timeout 3600 /home/yarizakurahime/.bun/bin/claude \
     --dangerously-skip-permissions \
