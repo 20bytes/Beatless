@@ -127,6 +127,7 @@ check_results() {
 # Main
 log "=== heartbeat tick ==="
 check_results
+check_pipeline "pr-followup"
 check_pipeline "github-pr"
 check_pipeline "blog-maintenance"
 log "=== heartbeat done ==="
