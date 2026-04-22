@@ -9,13 +9,17 @@ End-to-end: discover → evaluate → setup → **run tests** → **GSD2 debug**
 
 ## Philosophy
 
-Every bug must be proven by running code. Every fix must be verified by running tests. Every PR must pass triple review before submission. The pipeline uses each AI tool for what it does best:
+Every bug must be proven by running code. Every fix must be verified by running tests. Every PR must pass triple review before submission.
 
-- **Claude**: Orchestration, root cause analysis, PR authoring, code reading
-- **Codex** (`codex:codex-rescue`): **Write-mode fix generation + debugging** — Codex excels at contained code changes and testing in its sandbox
-- **Gemini** (`gemini:gemini-consult`): **Architecture research + contextual review** — Gemini's 1M context is ideal for understanding large codebases and checking design-level correctness
+## Plugin Policy (optional accelerators)
 
-This matches the plugin contracts: Codex gets `--write` tasks, Gemini gets analysis/research tasks.
+Plugins may be unavailable in `-p` mode or fail to initialize. Every phase MUST work with Claude + Bash alone. Plugins add speed/depth when available — try once, fallback immediately.
+
+| Plugin | Best at | Fallback |
+|--------|---------|----------|
+| **Claude** | Orchestration, root cause analysis, PR authoring | Always available |
+| **Codex** (`codex:codex-rescue`) | Contained code fixes, sandbox testing | Claude edits + Bash tests |
+| **Gemini** (`gemini:gemini-consult`) | Large codebase reading (1M ctx), architecture review | Claude reads key files + grep |
 
 ## AutoPilot Orchestration (GSD2 + Planning with Files)
 
@@ -33,9 +37,9 @@ This persists state across tool calls and makes the pipeline resumable if interr
 - Contribution workspace: `~/workspace/contrib/` (fresh clones for PR work — separate from hunt archive)
 - Staging: `~/workspace/pr-stage/`
 - GitHub: `gh` authenticated as CrepuscularIRIS
-- Rubric: `~/workspace/pr-stage/pr-scoring-rubric.md`
-- PR standard: `/home/yarizakurahime/claw/github/PR.md` (seven-step workflow)
-- Quality standard: `/home/yarizakurahime/claw/github/PullRequest.md` (8-item gate)
+- Rubric: `~/workspace/pr-stage/pr-scoring-rubric.md` (backup copy; primary source is the skill)
+- PR standard: skill `pr-workflow` (seven-step method — invoked via Skill tool)
+- Quality standard: skill `pr-quality-gate` (8-item scoring rubric — invoked via Skill tool)
 
 ---
 
@@ -437,7 +441,7 @@ If multiple commits exist on the branch, squash into a single clean commit:
 # Check commit count on branch
 git log --oneline main..HEAD
 # If >1 commit, squash:
-git rebase -i main  # squash all fixup/debug commits into one
+git reset --soft main && git commit -m "fix(<scope>): <description>"  # non-interactive squash
 ```
 
 The final commit should be self-contained and bisect-friendly — the project must compile at this commit.
@@ -538,13 +542,11 @@ Update `progress.md` and save to `~/workspace/pr-stage/pr-report-<date>.md`:
 
 1. **Dynamic verification only** — every bug must be reproduced by running code
 2. **No static-only findings** — if it can't crash when you run it, don't fix it
-3. **Codex for fixing/debugging** — write-mode code changes, sandbox testing
-4. **Gemini for research/review** — architecture analysis, 1M context codebase reading
-5. **Planning with Files** — track state in task_plan.md, findings.md, progress.md
-6. **GSD2 scientific method** — hypothesis → test → confirm before fixing
-7. **Parallel dispatch** — Codex and Gemini work simultaneously for review
-8. **Triple review required** — minimum 7/10 average to submit
-9. **8-item quality gate** — from PullRequest.md research standard
-10. **Seven-step PR format** — from PR.md workflow standard
-11. **One fix per PR** — small, reviewable, easy to merge
-12. **Follow up** — PRs are conversations, not fire-and-forget
+3. **Plugins optional** — Codex/Gemini accelerate but Claude + Bash is the baseline
+4. **Planning with Files** — track state in task_plan.md, findings.md, progress.md
+5. **GSD2 scientific method** — hypothesis → test → confirm before fixing
+6. **Triple review required** — minimum 7/10 average to submit
+7. **8-item quality gate** — skill `pr-quality-gate`
+8. **Seven-step PR format** — skill `pr-workflow`
+9. **One fix per PR** — small, reviewable, easy to merge
+10. **Follow up** — PRs are conversations, not fire-and-forget

@@ -1,6 +1,6 @@
 # Beatless Agent System — Shared Execution Protocol
 
-> This file is loaded by all Hermes agents when cwd is /home/yarizakurahime/claw
+> This file is loaded by all Hermes agents when cwd is /home/lingxufeng/claw
 
 ## Execution Policy (ALL AGENTS)
 
@@ -203,7 +203,7 @@ timeout 300 claude --print --model claude-sonnet-4-6 --max-turns 10 \
 
 All MiniMax-generated assets go to:
 ```
-/home/yarizakurahime/claw/output/minimax/
+/home/lingxufeng/claw/output/minimax/
 ├── images/           # image-01 output
 ├── audio/tts/        # speech-2.8-hd output
 ├── audio/music/      # music-2.5+ output
@@ -306,30 +306,30 @@ node ~/.hermes/shared/scripts/session-lock.mjs release --agent <your-name>
 
 ## Git Repository Warning
 
-**`/home/yarizakurahime/claw` is NOT a git repository.** For any git operations, code review (`/codex:review`), or PR workflows, you MUST `cd` into an actual git repo first:
+**`/home/lingxufeng/claw` is NOT a git repository.** For any git operations, code review (`/codex:review`), or PR workflows, you MUST `cd` into an actual git repo first:
 
 ```bash
 # For Beatless repo operations
-cd /home/yarizakurahime/claw/Beatless && claude --print --model claude-sonnet-4-6 "/codex:review ..."
+cd /home/lingxufeng/claw/Beatless && claude --print --model claude-sonnet-4-6 "/codex:review ..."
 
 # For OpenRoom
-cd /home/yarizakurahime/claw/OpenRoom && claude --print ...
+cd /home/lingxufeng/claw/OpenRoom && claude --print ...
 
 # For cloned repos
-cd /home/yarizakurahime/workspace/ghsim/<repo> && claude --print ...
+cd /home/lingxufeng/workspace/ghsim/<repo> && claude --print ...
 ```
 
 ## Key Paths
 
 | Path | Purpose | Git Repo? |
 |------|---------|-----------|
-| `/home/yarizakurahime/claw` | Main workspace (NOT a git repo) | **No** |
-| `/home/yarizakurahime/claw/Beatless` | Beatless agent repo | Yes |
-| `/home/yarizakurahime/claw/OpenRoom` | React frontend monorepo | Yes |
-| `/home/yarizakurahime/workspace/` | GitHub workspace for cloned repos | — |
-| `/home/yarizakurahime/workspace/ghsim/` | GitHub issue simulation repos | Yes (per repo) |
-| `/home/yarizakurahime/workspace/pr-stage/` | PR artifacts staging | — |
-| `/home/yarizakurahime/blog/` | Astro blog site | Yes |
+| `/home/lingxufeng/claw` | Main workspace (NOT a git repo) | **No** |
+| `/home/lingxufeng/claw/Beatless` | Beatless agent repo | Yes |
+| `/home/lingxufeng/claw/OpenRoom` | React frontend monorepo | Yes |
+| `/home/lingxufeng/workspace/` | GitHub workspace for cloned repos | — |
+| `/home/lingxufeng/workspace/ghsim/` | GitHub issue simulation repos | Yes (per repo) |
+| `/home/lingxufeng/workspace/pr-stage/` | PR artifacts staging | — |
+| `/home/lingxufeng/blog/` | Astro blog site | Yes |
 | `~/.hermes/shared/mailbox/` | Inter-agent mailbox | — |
 | `~/.hermes/shared/pipelines/` | Pipeline state machines | — |
 | `~/.hermes/shared/queue.md` | Task backlog | — |
