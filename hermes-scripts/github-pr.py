@@ -224,39 +224,125 @@ def has_duplicate_pr(repo, issue_number):
         return False
 
 
-def has_existing_claim(repo, issue_number):
-    """True if someone else already commented 'I'll work on this' or similar."""
+def _fetch_issue_comments(repo, issue_number):
+    """Return list of {login, body, author_association} dicts, or []."""
     try:
         result = subprocess.run(
             ["gh", "api", f"repos/{repo}/issues/{issue_number}/comments",
-             "--jq", "[.[] | {login: .user.login, body: .body}]"],
-            capture_output=True, text=True, timeout=15
+             "--jq", "[.[] | {login: .user.login, body: .body, author_association: .author_association}]"],
+            capture_output=True, text=True, timeout=15,
         )
         if result.returncode != 0:
-            return False
-        comments = json.loads(result.stdout or "[]")
-        claim_patterns = [
-            r"\bi.{0,3}ll (take|work on|pick.{0,3}up|handle)",
-            r"\bi.{0,3}m working on",
-            r"\bworking on (this|it)\b",
-            r"\b/assign\b",
-            r"\bcan i (take|work on)",
-        ]
-        for c in comments:
-            login = c.get("login", "")
-            if login == AUTHOR:
-                continue
-            body = (c.get("body") or "").lower()
-            for pat in claim_patterns:
-                if re.search(pat, body):
-                    return True
-        return False
+            return []
+        return json.loads(result.stdout or "[]")
     except (subprocess.TimeoutExpired, json.JSONDecodeError):
-        return False
+        return []
+
+
+# GitHub author_association values that indicate a maintainer voice
+MAINTAINER_ROLES = {"OWNER", "MEMBER", "COLLABORATOR"}
+
+# Labels that indicate the issue should not be worked on
+BLOCK_LABELS = {
+    "wontfix", "won't fix", "wont fix",
+    "invalid", "duplicate",
+    "needs-design", "needs design", "design needed",
+    "needs-discussion", "needs discussion",
+    "blocked", "on hold", "on-hold",
+    "status: blocked", "status: on-hold",
+    "question", "stale",
+}
+
+# Keyword patterns that indicate maintainer pushback/dispute
+DISPUTE_PATTERNS = [
+    # explicit rejection
+    r"\b(won['']?t fix|wontfix|not going to (fix|accept|merge|do))\b",
+    r"\b(will not|won['']?t) (be )?(fix|merge|accept|accepted|added)",
+    r"\b(closing|close) (this|the) (issue|pr)\b",
+    # skepticism about premise
+    r"\bi (don['']?t|do not) (see|think|believe) (why|how|this|any reason)",
+    r"\bnot sure (what|why|if) (you|this)",
+    r"\bthis is (not|already) (a bug|broken|disputed|done|fixed)",
+    r"\balready (disputed|discussed|rejected|decided|resolved)",
+    r"\bno (real )?reason (to|we should)",
+    # maintainer redirection (out-of-scope signals)
+    r"\bwe don['']?t (want|need|plan) (this|to)",
+    r"\bout of scope\b",
+    r"\bby design\b",
+    r"\bintentional\b.*\bbehavior\b",
+]
+
+
+def has_existing_claim(repo, issue_number, comments=None):
+    """True if someone else already commented 'I'll work on this' or similar.
+
+    Only flags when the claimer is NOT the harvest author. We do NOT require
+    maintainer-role here — a fellow contributor claiming the issue is enough
+    to yield.
+    """
+    if comments is None:
+        comments = _fetch_issue_comments(repo, issue_number)
+    claim_patterns = [
+        r"\bi.{0,3}ll (take|work on|pick.{0,3}up|handle)",
+        r"\bi.{0,3}m working on",
+        r"\bworking on (this|it)\b",
+        r"\b/assign\b",
+        r"\bcan i (take|work on)",
+    ]
+    for c in comments:
+        login = c.get("login", "")
+        if login == AUTHOR:
+            continue
+        body = (c.get("body") or "").lower()
+        for pat in claim_patterns:
+            if re.search(pat, body):
+                return True
+    return False
+
+
+def has_maintainer_dispute(repo, issue_number, comments=None):
+    """True if a maintainer has expressed skepticism / rejection on the issue.
+
+    This is the gate aiohttp#12413 bypassed. Scans comments authored by
+    OWNER / MEMBER / COLLABORATOR roles for dispute patterns. Returns
+    (bool, evidence_snippet).
+    """
+    if comments is None:
+        comments = _fetch_issue_comments(repo, issue_number)
+    for c in comments:
+        role = (c.get("author_association") or "").upper()
+        if role not in MAINTAINER_ROLES:
+            continue
+        body = (c.get("body") or "").lower()
+        for pat in DISPUTE_PATTERNS:
+            m = re.search(pat, body)
+            if m:
+                # extract a window around the match as evidence
+                start = max(0, m.start() - 40)
+                end = min(len(body), m.end() + 60)
+                return True, f"@{c.get('login','?')} ({role}): …{body[start:end].strip()}…"
+    return False, ""
+
+
+def has_block_label(issue):
+    """True if issue carries a label that blocks contribution (wontfix, invalid, etc.)."""
+    for lbl in issue.get("labels", []):
+        name = (lbl.get("name") if isinstance(lbl, dict) else str(lbl)).strip().lower()
+        if name in BLOCK_LABELS:
+            return True, name
+    return False, ""
 
 
 def preflight_filter(issues):
-    """Return (approved, rejected) tuples with reasons."""
+    """Return (approved, rejected) tuples with reasons.
+
+    Hard gates, in order:
+      1. Repo forbids AI (policy scan)
+      2. Issue has block-label (wontfix / invalid / needs-design / etc.)
+      3. Duplicate open PR already references this issue
+      4. Another contributor already claimed this issue
+      5. A maintainer disputed the issue premise in comments
+    """
     cache = load_policy_cache()
     approved = []
     rejected = []
@@ -264,20 +350,34 @@ def preflight_filter(issues):
     for issue in issues:
         repo = issue["repository"]["nameWithOwner"]
         number = issue["number"]
-        key = f"{repo}#{number}"
 
+        # Gate 1: repo AI policy
         policy = check_repo_policy(repo, cache)
-
         if policy["forbids_ai"]:
             rejected.append((issue, f"AI-forbidden repo. Evidence: {policy['ai_evidence']}"))
             continue
 
+        # Gate 2: block-label on the issue
+        blocked, lbl = has_block_label(issue)
+        if blocked:
+            rejected.append((issue, f"Issue has block-label '{lbl}'"))
+            continue
+
+        # Gate 3: duplicate open PR
         if has_duplicate_pr(repo, number):
             rejected.append((issue, f"Open PR already references #{number}"))
             continue
 
-        if has_existing_claim(repo, number):
+        # Gates 4 + 5 share the same comment fetch — do it once
+        comments = _fetch_issue_comments(repo, number)
+
+        if has_existing_claim(repo, number, comments=comments):
             rejected.append((issue, f"Another contributor already claimed #{number}"))
+            continue
+
+        disputed, evidence = has_maintainer_dispute(repo, number, comments=comments)
+        if disputed:
+            rejected.append((issue, f"Maintainer disputed the issue: {evidence}"))
             continue
 
         issue["_policy"] = policy
