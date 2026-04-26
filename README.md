@@ -29,7 +29,7 @@ Five commands encoding a two-path research methodology for ML experiments:
 
 | Command | Purpose |
 |---------|---------|
-| `/exp-status` | Workspace readiness diagnostic (GPU, data, plugins) |
+| `/exp-status` | Workspace readiness diagnostic (GPU, data, CLI bridges) |
 | `/exp-init` | Initialize experiment branch, planning files, baseline run |
 | `/exp-discover` | Generate hypotheses via idea-first or application-first path |
 | `/exp-run` | Autonomous experiment loop (quick: single-GPU / full: dual-GPU A/B) |
@@ -54,6 +54,7 @@ Quality controls: anti-inflation (no self-review), revert-test-reapply verificat
 
 ```
 commands/exp/           # Active: exp-* command pack (903 lines)
+commands/agents/        # Claude Code user agents for Codex/Gemini CLI bridges
 design/                 # Architecture: CONSTELLATION v1 → v3 evolution
 standards/              # PR guidelines, contribution protocols
 pipelines/              # Active pipeline specs (github-pr.md, blog-maintenance.md)
@@ -75,7 +76,7 @@ archive/                # Deprecated v2 infrastructure
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) v0.10.0+ (gateway + cron)
 - Claude Code CLI (`claude`) with Opus/Sonnet
 - GitHub CLI (`gh`, authenticated)
-- Codex and Gemini available as Claude Code plugins
+- Codex CLI (`codex`) and Gemini CLI (`gemini`) installed; exposed through `codex-cli` / `gemini-cli` Claude Code agents
 - `uv` for Python, `pnpm` for JS/TS
 
 ## License
